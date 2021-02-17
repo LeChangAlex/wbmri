@@ -253,6 +253,11 @@ def real_label_volume(label_paths, im):
 
 	return mask
 
+
+def get_label_df():
+	return pd.read_pickle("/datasets/wbmri/label_df.pkl")
+
+
 class BodyPartDataset(Dataset):
 
 	def __init__(self, split="train", body_part="head", transform=None, vol_size=None, 
@@ -297,80 +302,51 @@ class BodyPartDataset(Dataset):
 
 
 		# print(self.idx_to_volume_n)
+
+		# TODO: Implement function which returns df
+		# with cols [volume_n, age, sex, weight]
 		self.metadata = pd.read_csv("/datasets/wbmri/anonym_wbmri_metadata.csv")
 		self.metadata = self.metadata.fillna("0")
 
 
-		# label_dict = np.load("label_dict.npy", allow_pickle=True).item()
+		# TODO: Implement function which returns df 
+		# with cols [volume_n, list of tuples of format (slice number, path to slice label)]
+		self.label_df = get_label_df()
 
-		# label_df = pd.DataFrame.from_dict(label_dict)
-		self.label_df = pd.read_pickle("/datasets/wbmri/label_df.pkl")
-
-		print(self.label_df["label_paths"][0], type(self.label_df["label_paths"][0]))
+		self.coords_dict = get_crop_coords(return_dict=True)
 
 
 		self.metadata = self.metadata.merge(self.label_df, on="volume_n", how="left")
-		# print(self.metadata)
-
-		# if self.real_labels:
-		# 	patients = self.metadata[self.metadata["rand"] < 1]
-
-		# elif split == "train":
-		# 	patients = self.metadata[self.metadata["rand"] < 0.8]
-		# elif split == "test":
-		# 	patients = self.metadata[self.metadata["rand"] > 0.8]
-		# else:
-		# 	patients = self.metadata["anonym_id"].values
-
+	
 		if split == "train":
-			patients = self.metadata[pd.isna(self.metadata["label_paths"])]
+			self.metadata = self.metadata[pd.isna(self.metadata["label_paths"])]
 		elif split == "test":
-			patients = self.metadata[np.logical_not(pd.isna(self.metadata["label_paths"]))]
+			self.metadata = self.metadata[np.logical_not(pd.isna(self.metadata["label_paths"]))]
 		
 
-		patients = patients[patients["dim1"].apply(int) > 20]
-
-
-
-		# self.metadata.to_csv("{}_{}_metadata.csv".format(self.body_part, self.split))
+		self.metadata = self.metadata[self.metadata["dim1"].apply(int) > 20]
 		
-		# real
-		# if real_labels:
-			# self.metadata = self.metadata[self.metadata.apply(lambda row: (nodule(row["volume_n"]) and exists(row["volume_n"])) or (exists(row["volume_n"]) and row["rand"] > 0.8), axis=1)]
-		# else:
-		self.metadata = patients
 		self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
-
-
+		
 		self.metadata = self.metadata.reset_index()
-		# print(self.metadata)
+
+
+
 
 		self.multi_ch_nodule = multi_ch_nodule
-		if self.split == "test":
-			self.nodule_n = self.metadata["anonym_id"][self.metadata["rand"] > 0.9].values
-
-		self.coords_dict = get_crop_coords(return_dict=True)
 		self.transform = transform
 		self.n_slices = n_slices
 		self.vol_size = vol_size
-
-
 		self.cond_features = cond_features
 		self.cond_noise = cond_noise
-		# self.volumes = torch.zeros((len(self), 32, 192, 192))
-		# self.labels = torch.zeros((len(self), 32, 192, 192))
-
-
 		self.cond = cond
 		self.volumes = []
 		self.nodule_volumes = []
 		self.labels = []
 		self.volume_n = []
 
-
 		self.slices = []
 		self.test_batch = test_batch
-
 		self.radius = n_slices // 2
 
 
@@ -382,125 +358,7 @@ class BodyPartDataset(Dataset):
 		self.masks = []
 
 		
-		# if self.all_slices or self.sliding_window:
-		# 	# print(len(self.metadata), "volumes")
-		# 	# print("a==========================")
-		# 	for index in tqdm(range(10)):#len(self.metadata))):
-
-		# 		# print("b========================")
-		# 		n = self.metadata["volume_n"][index]
-
-		# 		sex = self.metadata["sex"][index]
-		# 		weight = self.metadata["weight"][index]
-		# 		age = self.metadata["age"][index]
-
-
-		# 		slice_dir = "/datasets/wbmri/slice_png_{}_headless/volume_{}/".format(self.body_part, n)
-		# 		# slice_dir = "/datasets/wbmri/slice_png_{}_ni/volume_{}/".format(self.body_part, n)
-
-		# 		n_slices = len([name for name in os.listdir(slice_dir) if name[-4:] == ".png"])
-
-
-		# 		# im = read_png_volume("/datasets/wbmri/slice_png_abdomen_ni/volume_{}/".format(n), self.transform)
-
-		# 		if self.sliding_window:
-
-
-		# 			# store column of possible windows
-		# 			# im = read_png_volume("/datasets/wbmri/headless_preproc/volume_{}/".format(n), self.transform)
-		# 			im = read_png_volume("/datasets/wbmri/preproc5/volume_{}/".format(n), self.transform)
-					
-		# 			l_x, u_x, l_y, u_y = self.coords_dict[n]
-
-		# 			im = im[:, :im.shape[1] // 2, l_x: u_x]
-					
-
-		# 			size_h = int(im.shape[1] * 256 / im.shape[2])
-
-		# 			im = im.unsqueeze(0)
-		# 			im = nn.functional.interpolate(im.float(), size=(size_h, 256), mode="bicubic", align_corners=False).squeeze(0).int()
-
-
-		# 		else:
-		# 			im = read_png_volume("/datasets/wbmri/slice_png_chest_headless/volume_{}/".format(n), self.transform)
-
-
-		# 			h = 0
-		# 			im = im[:, h :h + im.shape[2]].unsqueeze(0)
-
-		# 			im = nn.functional.interpolate(im.float(), size=(256, 256), mode="bicubic", align_corners=False).squeeze(0).int()
-
-
-		# 		self.volumes.append(im)
-		# 		# print(self.real_labels)
-
-		# 		if self.nodule:
-		# 			if self.real_labels:
-		# 				nodule_im = im
-
-		# 				mask = real_label_volume(self.metadata["label_paths"][index], im)
-						
-		# 				# print(mask.shape, "1")
-		# 				h = 0
-						
-		# 				l_x, u_x, l_y, u_y = self.coords_dict[n]
-						
-
-		# 				mask = mask[:, l_x: u_x, l_y: u_y]
-						
-		# 				# print(mask.shape, "2")
-
-		# 				mask = mask[:, h :h + mask.shape[2]].unsqueeze(0)
-
-		# 				# mask = nn.functional.interpolate(mask, size=(256, 256), mode="nearest", align_corners=False).squeeze(0)
-		# 				mask = nn.Upsample(size=(256, 256), mode="nearest")(mask).squeeze(0)
-		# 				mask[mask >= 1] = 1
-		# 			else:
-		# 				nodule_im, mask = insert_nodule_volume(im)
-		# 			self.nodule_volumes.append(nodule_im)
-		# 			self.labels.append(mask)
-
-		# 		self.slices += [(index, n, s, sex, weight, age, n_slices) for s in range(max(n_slices - 24, 1 + self.radius), n_slices - 2 - self.radius)]
-
-
-
-		# 	# self.volumes = torch.cat(self.volumes, 0).unsqueeze(1)
-		# 	# self.labels = torch.cat(self.labels, 0).unsqueeze(1)
-		# 	# self.volume_n = torch.cat(self.volume_n, 0).unsqueeze(1)
-		# else:
-		# 	for index in tqdm(range(len(self.metadata.index))):
-
-		# 		n = self.metadata["volume_n"][index]
-
-		# 		sex = self.metadata["sex"][index]
-		# 		weight = self.metadata["weight"][index]
-		# 		age = self.metadata["age"][index]
-
-		# 		if self.sliding_window:
-		# 			slice_dir = "/datasets/wbmri/headless_preproc/volume_{}/".format(n)
-
-		# 		else:
-		# 			slice_dir = "/datasets/wbmri/slice_png_{}_headless/volume_{}/".format(self.body_part, n)
-		# 			# slice_dir = "/datasets/wbmri/slice_png_{}_ni/volume_{}/".format(self.body_part, n)
-
-		# 		n_slices = len([name for name in os.listdir(slice_dir) if name[-4:] == ".png"])
-
-				
-		# 		self.slices += [(index, n, s, sex, weight, age, n_slices) for s in range(max(n_slices - 24, 1 + self.radius), n_slices - 2 - self.radius)]
-
-		# 	# for i in range(100):
-		# 		# print(self.slices[i])
-
-		# z_list = [n_slices - s for index, n, s, sex, weight, age, n_slices in self.slices]
-		# self.z_mean, self.z_std = np.mean(z_list), np.std(z_list)
-
-
-
-		# print(self.metadata)
-		# if self.all_slices or self.sliding_window:
-			# print(len(self.metadata), "volumes")
-			# print("a==========================")
-		for index in tqdm(range(len(self.metadata))):
+		for index in tqdm(range(10)):#len(self.metadata))):
 
 			# print("b========================")
 			n = self.metadata["volume_n"][index]
