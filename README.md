@@ -47,6 +47,8 @@
 
   Call run_algorithm.py with 3 arguments: the directory of the volume, the model checkpoint for the chest, and the checkpoint for the legs.
   
-  e.g. python run_algorithm.py --vol_dir volumes/volume_1 --chest_ckpt vae_models/condyzswfixedy_180.tar --legs_ckpt vae_models/legs_180.tar
+  e.g. 
+  
+  python run_algorithm.py --vol_dir volumes/volume_1 --chest_ckpt vae_models/condyzswfixedy_180.tar --legs_ckpt vae_models/legs_180.tar
 
   The tool allows you to scroll through each volume on the left and provides the corresponding anomaly mask on the right.
