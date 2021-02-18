@@ -10,6 +10,7 @@
 
   The wbMRI images are stored as png files, with one directory per volume.
   e.g. 
+  
     - volume_1/1.png
     - volume_1/2.png
     - ...
