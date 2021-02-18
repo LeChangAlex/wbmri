@@ -15,6 +15,32 @@ import pandas as pd
 from sklearn import metrics
 from skimage import exposure, restoration, transform
 
+pd.set_option('display.max_columns', None)
+
+# class Volume():
+
+
+# 	def __init__(self, volume, l_x, u_x, l_y, u_y):
+# 		"""
+# 		vol: full resolution volume
+
+# 		"""
+
+# 		self.volume = volume
+
+# 		self.l_x = l_x
+# 		self.u_x = u_x
+# 		self.l_y = l_y
+# 		self.u_y = u_y
+
+
+
+# 	def get_lowres(self):
+
+
+
+
+
 
 def read_png_volume(dir, transform=None):
 
@@ -193,48 +219,6 @@ def insert_nodule(tensor, intensity=0.7, sigma=6, n_nodule=1, multi_ch=False):
 	
 	return vol, mask
 
-	# masks = []
-
-
-	# for i in range(batch.shape[0]):
-	# 	try:
-	# 		vol = batch[i]
-	# 		n_z = min(vol.shape[0], 22)
-
-	# 		coords = np.indices((n_z, vol.shape[1] - 32, vol.shape[2] - 32))
-
-	# 		tissue_int = 0.1
-
-	# 		coords[0] += vol.shape[0] - n_z
-	# 		coords[1] += 16
-	# 		coords[2] += 16
-
-	# 		tissue_idx1 = vol[coords[0], coords[1], coords[2]] > tissue_int
-	# 		tissue_idx2 = vol[coords[0], coords[1], coords[2]] < 0.7
-	# 		tissue_idx = torch.logical_and(tissue_idx1, tissue_idx2)
-	# 		# tissue_idx = np.logical_and(vol[coords[0], coords[1], coords[2]] > tissue_int, vol[coords[0], coords[1], coords[2]] < 0.7)
-	# 		# print(tissue_idx.shape)
-	# 		a = tissue_idx.cpu().numpy()
-	# 		tissue_coords = coords[:, a]
-
-	# 		idx = np.random.randint(tissue_coords.shape[-1])
-
-	# 		loc = tissue_coords[:, idx]
-
-	# 		x, y = np.meshgrid(np.linspace(-15, 15, 32), np.linspace(-15, 15, 32))
-	# 		d = np.sqrt(x * x + y * y)
-	# 		nodule = np.exp(-(d ** 2 / (2.0 * sigma ** 2)))#[np.newaxis, ...]
-
-	# 		mask = torch.zeros_like(vol)
-	# 		vol[loc[0] - 1: loc[0] + 2, loc[1] - 16: loc[1] + 16, loc[2] - 16: loc[2] + 16] += torch.from_numpy(nodule * intensity)
-	# 		mask[loc[0] - 1: loc[0] + 2, loc[1] - 16: loc[1] + 16, loc[2] - 16: loc[2] + 16] += torch.from_numpy((nodule > 0.3).astype(np.float))
-	# 	except:
-	# 		mask = torch.zeros_like(vol)
-	# 	masks.append(mask.unsqueeze(0))
-	# batch[batch > 1] = 1
-	# masks = torch.cat(masks, 0)
-	# return batch, masks
-
 
 def real_label_volume(label_paths, im):
 
@@ -257,25 +241,45 @@ def real_label_volume(label_paths, im):
 def get_label_df():
 	return pd.read_pickle("/datasets/wbmri/label_df.pkl")
 
+def find_vol_path(row):
+
+	n = row["volume_n"]
+
+	path1 = "/datasets/wbmri/preproc5/volume_{}".format(n)
+	path2 = "/datasets/wbmri/preproc5_bright/volume_{}".format(n)
+
+	if os.path.exists(path1):
+		return path1
+	elif os.path.exists(path2):
+		return path2
+	return None
+
+def count_slices(row):
+	return len(os.listdir(row["volume_path"]))
+
 
 class BodyPartDataset(Dataset):
 
 	def __init__(self, split="train", body_part="head", transform=None, vol_size=None, 
 		all_slices=False, n_slices=1, real_labels=False, cond_features=False, cond_noise=False, 
 		return_n=False, cond=[], nodule=False, test_batch=False, multi_ch_nodule=False, sliding_window=False,
-		store_full_volume=False):
+		store_full_volume=False, return_volumes=False):
 
 		def exists(i):
-			try:
+			
+			return os.path.exists("/datasets/wbmri/headless_preproc_crops/chest_{}.png".format(i)) or \
+			os.path.exists("/datasets/wbmri/preproc5_bright_crops/chest_{}.png".format(i))
+			
+			# try:
 
-				# a = io.imread("/datasets/wbmri/slice_png_abdomen_ni/volume_{}/slice_0.png".format(i), as_gray=True)
-				# a = io.imread("/datasets/wbmri/slice_png_chest_headless/volume_{}/0.png".format(i), as_gray=True)
+			# 	# a = io.imread("/datasets/wbmri/slice_png_abdomen_ni/volume_{}/slice_0.png".format(i), as_gray=True)
+			# 	# a = io.imread("/datasets/wbmri/slice_png_chest_headless/volume_{}/0.png".format(i), as_gray=True)
 
-				a = io.imread("/datasets/wbmri/headless_preproc_crops/chest_{}.png".format(i), as_gray=True)
+			# 	a = io.imread("/datasets/wbmri/headless_preproc_crops/chest_{}.png".format(i), as_gray=True)
 
-				return True
-			except:
-				return False
+			# 	return True
+			# except:
+			# 	return False
 
 		# def nodule(i):
 		# 	return i in [5, 45, 198, 357, 479, 1133, 1401, 1409] # [5, 45, 198, 353, 357, 479, 1133, 1401, 1409]
@@ -297,11 +301,9 @@ class BodyPartDataset(Dataset):
 		self.split = split
 		self.body_part = body_part
 		self.real_labels = real_labels
-		# print(self.tissue_coords)
 		self.sliding_window = sliding_window
 
-
-		# print(self.idx_to_volume_n)
+		self.return_volumes = return_volumes
 
 		# TODO: Implement function which returns df
 		# with cols [volume_n, age, sex, weight]
@@ -323,15 +325,23 @@ class BodyPartDataset(Dataset):
 		elif split == "test":
 			self.metadata = self.metadata[np.logical_not(pd.isna(self.metadata["label_paths"]))]
 		
+		# add volume_path column
+		self.metadata["volume_path"] = self.metadata.apply(find_vol_path, 1)
 
+		# only include volumes with > 20 slices
 		self.metadata = self.metadata[self.metadata["dim1"].apply(int) > 20]
 		
-		self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
+		# remove rows with no paths
+		self.metadata = self.metadata[self.metadata["volume_path"].apply(lambda x: x is not None)]
+		
+		# add n_slice column 
+		self.metadata["n_slices"] = self.metadata.apply(count_slices, 1)
+
+		# self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
 		
 		self.metadata = self.metadata.reset_index()
 
-
-
+		print(self.metadata)
 
 		self.multi_ch_nodule = multi_ch_nodule
 		self.transform = transform
@@ -350,7 +360,7 @@ class BodyPartDataset(Dataset):
 		self.radius = n_slices // 2
 
 
-		correct_crop_list = os.listdir("/datasets/wbmri/headless_preproc_crops/")
+		# correct_crop_list = os.listdir("/datasets/wbmri/headless_preproc_crops/")
 
 
 		# print(self.z_mean, self.z_std)
@@ -358,7 +368,7 @@ class BodyPartDataset(Dataset):
 		self.masks = []
 
 		
-		for index in tqdm(range(10)):#len(self.metadata))):
+		for index in tqdm(range(3)):#len(self.metadata))):
 
 			# print("b========================")
 			n = self.metadata["volume_n"][index]
@@ -367,11 +377,10 @@ class BodyPartDataset(Dataset):
 			weight = self.metadata["weight"][index]
 			age = self.metadata["age"][index]
 
+			n_slices = self.metadata["n_slices"][index]
 
-			slice_dir = "/datasets/wbmri/slice_png_chest_headless/volume_{}/".format(n)
-			# # slice_dir = "/datasets/wbmri/slice_png_{}_ni/volume_{}/".format(self.body_part, n)
-
-			n_slices = len([name for name in os.listdir(slice_dir) if name[-4:] == ".png"])
+			# slice_dir = "/datasets/wbmri/slice_png_chest_headless/volume_{}/".format(n)
+			# n_slices = len([name for name in os.listdir(slice_dir) if name[-4:] == ".png"])
 
 
 			# # im = read_png_volume("/datasets/wbmri/slice_png_abdomen_ni/volume_{}/".format(n), self.transform)
@@ -380,7 +389,11 @@ class BodyPartDataset(Dataset):
 
 			# store column of possible windows
 			# im = read_png_volume("/datasets/wbmri/headless_preproc/volume_{}/".format(n), self.transform)
-			im = read_png_volume("/datasets/wbmri/preproc5/volume_{}/".format(n), self.transform)
+			# im = read_png_volume("/datasets/wbmri/preproc5/volume_{}/".format(n), self.transform)
+			
+			vol_path = self.metadata["volume_path"][index]
+
+			im = read_png_volume(vol_path, self.transform)
 			
 			l_x, u_x, l_y, u_y = self.coords_dict[n]
 			full_im = None
@@ -434,23 +447,48 @@ class BodyPartDataset(Dataset):
 				if self.real_labels:
 					nodule_im = im
 
-					mask = real_label_volume(self.metadata["label_paths"][index], im)
+					label = real_label_volume(self.metadata["label_paths"][index], im)
 
 
-					if not self.store_full_volume:					
-						h = 0
+					# if not self.store_full_volume:					
+					# 	h = 0
 						
-						l_x, u_x, l_y, u_y = self.coords_dict[n]
+					# 	l_x, u_x, l_y, u_y = self.coords_dict[n]
 						
+					# 	mask = mask[:, l_x: u_x, l_y: u_y]
+					# 	mask = mask[:, h :h + mask.shape[2]].unsqueeze(0)
 
-						mask = mask[:, l_x: u_x, l_y: u_y]
+					# 	mask = nn.Upsample(size=(256, 256), mode="nearest")(mask).squeeze(0)
+					# 	mask[mask >= 1] = 1
+
+
+					# store resized chest label
+					if self.body_part == "chest":
+
+						nodule_im = im
+						label = label[:, :label.shape[1] // 2, l_x: u_x].unsqueeze(0)
+
+						label = nn.functional.interpolate(label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
+
+					elif self.body_part == "legs":
 						
+						left_label = label[:, label.shape[1] // 2:, :label.shape[2] // 2]
+						right_label = label[:, label.shape[1] // 2:, label.shape[2] // 2:]
+				
 
-						mask = mask[:, h :h + mask.shape[2]].unsqueeze(0)
+						left_label = left_label.unsqueeze(0)
+						left_label = nn.functional.interpolate(left_label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
+					
+						right_label = right_label.unsqueeze(0)
+						right_label = nn.functional.interpolate(right_label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
 
-						# mask = nn.functional.interpolate(mask, size=(256, 256), mode="nearest", align_corners=False).squeeze(0)
-						mask = nn.Upsample(size=(256, 256), mode="nearest")(mask).squeeze(0)
-						mask[mask >= 1] = 1
+						nodule_im = im
+						label = (left_label, right_label)
+
+
+
+
+
 				else:
 					if self.body_part == "chest":
 						nodule_im, mask = insert_nodule_volume(im)
@@ -462,7 +500,7 @@ class BodyPartDataset(Dataset):
 						mask = (left_mask, right_mask)
 
 				self.nodule_volumes.append(nodule_im)
-				self.labels.append(mask)
+				self.labels.append(label)
 
 			self.slices += [(index, n, s, sex, weight, age, n_slices) for s in range(max(n_slices - 24, 1 + self.radius), n_slices - 2 - self.radius)]
 
@@ -476,6 +514,8 @@ class BodyPartDataset(Dataset):
 
 
 	def __len__(self):
+		if self.return_volumes:
+			return len(self.volumes)
 		if self.sliding_window:
 			return len(self.slices)
 
@@ -570,7 +610,7 @@ class BodyPartDataset(Dataset):
 		if self.body_part == "chest":
 			im = self.volumes[vn][s - self.radius: s + self.radius + 1].float() / 255
 
-			print(im.shape, "===========================")
+			# print(im.shape, "===========================")
 
 			# h = 0
 			# if self.sliding_window:
@@ -706,14 +746,13 @@ class BodyPartDataset(Dataset):
 		sex = self.metadata["sex"][index]
 		weight = self.metadata["weight"][index]
 		age = self.metadata["age"][index]
+		n_slices = self.metadata["n_slices"][index]
+
 		vn = index
 
 
-		slice_dir = "/datasets/wbmri/slice_png_chest_headless/volume_{}/".format(n)
-		# # slice_dir = "/datasets/wbmri/slice_png_{}_ni/volume_{}/".format(self.body_part, n)
 		l_x, u_x, l_y, u_y = self.coords_dict[n]
 
-		n_slices = len([name for name in os.listdir(slice_dir) if name[-4:] == ".png"])
 
 
 
@@ -739,7 +778,6 @@ class BodyPartDataset(Dataset):
 				nodule_volume = self.nodule_volumes[vn].float() / 255 
 				
 
-				# im = self.volumes[vn][s - self.radius: s + self.radius + 1].float() / 255
 			
 
 

@@ -10,7 +10,7 @@ from torch.nn.modules.utils import _pair, _triple, _quadruple
 
 from numba  import jit
 # import tensorflow as tf
-
+import random
 
 def extend_batch(batch, dataloader, batch_size):
 	"""
@@ -85,24 +85,23 @@ def fast_auc2(y_prob, y_true, step=100):
 
 	return auc
 	
-def wb_mask(dataset, index, model):
+def wb_mask(dataset, index, model, full_res_mask=False):
 
 
 	# for i in range(len(dataset)):
 	windows, full_im, window_features, (l_x, u_x, l_y, u_y), window_heights, slice_numbers, resized_h, window_widths, label, nodule_vol = dataset.ordered_windows(index)
-
 	windows, window_features = windows.cuda(), window_features.cuda()
 
-
 	with torch.no_grad():
-		iwae, rec_loss, kls, recs, rec_loss_t = model.batch_iwae(windows, None, window_features, 1)
+		iwae, rec_loss, kls, window_recs, rec_loss_t = model.batch_iwae(windows, None, window_features, 1)
 
 
 	radius = windows.shape[1] // 2
 	resized_label = None	
 
 	if dataset.body_part == "chest":
-		chest_predictions = torch.zeros((full_im.shape[0], resized_h, 256))
+		predictions = torch.zeros((full_im.shape[0], resized_h, 256))
+		recs = torch.zeros((full_im.shape[0], resized_h, 256))
 
 
 
@@ -112,7 +111,8 @@ def wb_mask(dataset, index, model):
 			h = window_heights[i]
 			
 						
-			chest_predictions[s, h: h + 256, :] += rec_loss_t[i, radius].cpu()
+			predictions[s, h: h + 256, :] += rec_loss_t[i, radius].cpu()
+			recs[s, h: h + 256, :] += window_recs[i, radius].cpu()
 
 		
 		# divide overlaps by 2
@@ -122,23 +122,26 @@ def wb_mask(dataset, index, model):
 			next_h = heights[i+1]
 
 
-			chest_predictions[:, next_h :h+256] /= 2
+			predictions[:, next_h :h+256] /= 2
+			recs[:, next_h :h+256] /= 2
+		if full_res_mask:
+			recs = nn.functional.interpolate(recs.unsqueeze(0).unsqueeze(0), 
+				size=(full_im.shape[0], full_im.shape[1] // 2, u_x - l_x),
+					mode="nearest").squeeze(0).squeeze(0)
 
+			predictions = nn.functional.interpolate(predictions.unsqueeze(0).unsqueeze(0), 
+				size=(full_im.shape[0], full_im.shape[1] // 2, u_x - l_x),
+					mode="nearest").squeeze(0).squeeze(0)
 
-		# post process
-
-		resized_predictions = nn.functional.interpolate(chest_predictions.unsqueeze(0).unsqueeze(0), 
-			size=(full_im.shape[0], full_im.shape[1] // 2, u_x - l_x),
-				mode="nearest").squeeze(0).squeeze(0)
-
-		resized_label = nn.functional.interpolate(label.unsqueeze(0).unsqueeze(0), 
-			size=(full_im.shape[0], full_im.shape[1] // 2, u_x - l_x),
-				mode="nearest").squeeze(0).squeeze(0)
+			label = nn.functional.interpolate(label.unsqueeze(0).unsqueeze(0), 
+				size=(full_im.shape[0], full_im.shape[1] // 2, u_x - l_x),
+					mode="nearest").squeeze(0).squeeze(0)
 
 
 	elif dataset.body_part == "legs":
 
-		legs_predictions = torch.zeros((full_im.shape[0], resized_h, 512))
+		predictions = torch.zeros((full_im.shape[0], resized_h, 512))
+		recs = torch.zeros((full_im.shape[0], resized_h, 512))
 
 
 
@@ -148,7 +151,8 @@ def wb_mask(dataset, index, model):
 			h = window_heights[i]
 			w = window_widths[i]
 			
-			legs_predictions[s, h: h + 256, w: w + 256] += rec_loss_t[i, radius].cpu()
+			predictions[s, h: h + 256, w: w + 256] += rec_loss_t[i, radius].cpu()
+			recs[s, h: h + 256, w: w + 256] += window_recs[i, radius].cpu()
 
 		
 		# divide overlaps by 2
@@ -158,17 +162,25 @@ def wb_mask(dataset, index, model):
 			next_h = heights[i+1]
 
 
-			legs_predictions[:, next_h :h+256] /= 2
+			predictions[:, next_h :h+256] /= 2
+			recs[:, next_h :h+256] /= 2
 
 
-		# post process
+		if full_res_mask:
 
-		resized_predictions = nn.functional.interpolate(legs_predictions.unsqueeze(0).unsqueeze(0), 
-			size=(full_im.shape[0], full_im.shape[1] // 2 + full_im.shape[1] % 2, full_im.shape[2]),
-				mode="nearest").squeeze(0).squeeze(0)
+			predictions = nn.functional.interpolate(predictions.unsqueeze(0).unsqueeze(0), 
+				size=(full_im.shape[0], full_im.shape[1] // 2 + full_im.shape[1] % 2, full_im.shape[2]),
+					mode="nearest").squeeze(0).squeeze(0)
+
+			recs = nn.functional.interpolate(recs.unsqueeze(0).unsqueeze(0), 
+				size=(full_im.shape[0], full_im.shape[1] // 2 + full_im.shape[1] % 2, full_im.shape[2]),
+					mode="nearest").squeeze(0).squeeze(0)
+			label = nn.functional.interpolate(label.unsqueeze(0).unsqueeze(0), 
+				size=(full_im.shape[0], full_im.shape[1] // 2, u_x - l_x),
+					mode="nearest").squeeze(0).squeeze(0)
 
 
-	return full_im, resized_predictions, (l_x, u_x, l_y, u_y), resized_label, nodule_vol
+	return full_im, predictions, (l_x, u_x, l_y, u_y), label, nodule_vol, recs
 
 
 
@@ -350,6 +362,61 @@ class MedianPool2d(nn.Module):
 		x = x.unfold(2, self.k[0], self.stride[0]).unfold(3, self.k[1], self.stride[1])
 		x = x.contiguous().view(x.size()[:4] + (-1,)).median(dim=-1)[0]
 
+
+def get_validation_score(val_dataset, model, post_proc=False, compute_auroc=True):
+
+	first = {}
+
+	flat_losses = []
+	flat_labels = []
+
+	mask_losses = []
+	rand = int(random.random() * len(val_dataset))
+	
+	for i in tqdm(range(len(val_dataset))):
+
+		full_im, loss_mask, (l_x, u_x, l_y, u_y), nodule_label, nodule_vol, nodule_recs = wb_mask(val_dataset, i, model)
+	
+
+		if post_proc:
+			postproc_loss_mask = MedianPool3d(kernel_size=(3, 5, 5), stride=1, padding=2)(loss_mask.unsqueeze(0).unsqueeze(0))
+			mask_losses.append(postproc_loss_mask.reshape(-1))
+		else:
+			mask_losses.append(loss_mask.reshape(-1))
+
+
+		flat_losses.append(loss_mask.reshape(-1))
+
+
+		flat_labels.append(nodule_label.reshape(-1))
+		if i == rand:
+			first["batch_nodule"] = nodule_vol
+			first["batch_labels"] = nodule_label
+			first["nodule_rec_loss_t"] = loss_mask
+			first["nodule_recs"] = nodule_recs
+
+
+
+	flat_losses = torch.cat(flat_losses)
+	flat_labels = torch.cat(flat_labels)
+	loss_mask = torch.cat(mask_losses)
+
+
+
+	auroc = fast_auc2(loss_mask, flat_labels)
+	auprc = fast_auprc(loss_mask, flat_labels)
+
+	sensitivity = 0
+	specificity = 0
+	first["auroc"] = auroc
+	first["auprc"] = auprc
+	first["rec_loss"] = torch.mean(flat_losses)
+	first["sensitivity"] = sensitivity
+	first["specificity"] = specificity
+
+	# first["channel_loss"] = channel_loss
+
+	return first
 
 
 

@@ -13,7 +13,7 @@ from tqdm import tqdm
 from prob_utils import normal_parse_params, GaussianLoss
 
 from datasets import load_dataset
-from train_utils import extend_batch, get_validation_iwae
+from train_utils import extend_batch, get_validation_iwae, get_validation_score
 from VAEAC import VAE
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -89,151 +89,6 @@ class MyDataParallel(torch.nn.DataParallel):
 			return super(MyDataParallel, self).__getattr__(name)
 		except AttributeError:
 			return getattr(self.module, name)
-# 
-
-# class FairDataset(Dataset):
-# 	# def __init__(self, path, transform, resolution=256):
-
-# 	# # def __init__(self,csv_file,root_dir,transform=None):
-# 	#     self.annotations = pd.read_csv("../annotations_slices_medium.csv", engine='python')
-# 	#     self.root_dir = path 
-# 	#     self.transform = transform
-	
-# 	# def __len__(self):
-# 	#     return (len(self.annotations))
-
-# 	# def __getitem__(self,index):
-# 	#     volume_name = os.path.join(self.root_dir,
-# 	#     self.annotations.iloc[index,0])
-# 	#     np_volume = np.load(volume_name)
-# 	#     volume = Image.fromarray(np_volume)
-# 	#     # annotations = self.annotations.iloc[index,0].as_matrix()
-# 	#     # annotations = annotations.astype('float').reshape(-1,2)
-# 	#     sample = volume#[np.newaxis, ...]
-
-# 	#     if self.transform:
-# 	#         sample = self.transform(sample)
-		
-# 	#     return sample
-# 	def __init__(self, path, transform, reg, resolution=512, split="train", run=0, intensity=1, size=10, nodule_mask=0):
-
-
-# 		self.nodule_mask = abs(nodule_mask)
-# 		self.metadata = pd.read_csv("../mri_gan_cancer/data/preproc_chest_metadata.csv")
-# 		if split == "train":
-# 			self.metadata = self.metadata[self.metadata["train"] == 1]
-# 		elif split == "test":
-# 			self.metadata = self.metadata[self.metadata["train"] == 0]
-# 		else:
-# 			raise Exception("Invalid data split")
-
-
-
-		
-
-# 		data_mean = 0.175
-# 		data_std = 0.17
-
-# 		adjusted_intensity = intensity / data_std
-# 		adjusted_max = (1 - data_mean) / data_std
-		
-# 		self.data = np.load("../mri_gan_cancer/data/chest_data.npy")
-# 		# self.min_val = np.amin(self.data)
-# 		# self.max_val = np.amax(self.data)
-# 		# # print("mean:", np.mean(self.data.flatten()))
-# 		# # print("std:", np.std(self.data.flatten()))
-# 		# # print("max:", np.amax(self.data))
-
-
-
-# 		# self.masks = np.zeros_like(self.data)
-
-# 		# self.positions = pd.read_csv("../mri_gan_cancer/data/nodule_positions.csv")["run_{}".format(run)]
-
-# 		# for i in range(self.data.shape[0]):
-# 		#     positions = [int(n) for n in self.positions[i].split(",")]
-
-# 		#     self.data[i] = self.insert_nodule(self.data[i], adjusted_intensity, size, positions)
-# 		#     self.masks[i, positions[1] - self.nodule_mask: positions[1] + self.nodule_mask, positions[0] - self.nodule_mask: positions[0] + self.nodule_mask] = 1
-
-# 		#     # print("nodules inserted")
-# 		# self.data[self.data > adjusted_max] = adjusted_max
-# 		# # print("clipped at", adjusted_max)
-# 		# self.data = self.data[self.metadata["npy_idx"]]
-# 		# cv2.imwrite("test/diseased_{}.png".format(run), (self.data[0] * data_std + data_mean) * 255) 
-# 		# cv2.imwrite("test/diseased_{}_mask.png".format(run), (self.masks[0] * 255) )
-
-# 		self.transform = transform
-# 		self.reg = reg
-
-	
-# 	def insert_nodule(self, im, intensity, sigma, position):
-		
-# 		x, y = np.meshgrid(np.linspace(-25, 25, 50), np.linspace(-25, 25, 50))
-# 		d = np.sqrt(x * x + y * y)
-# 		nodule = np.exp(-(d ** 2 / (2.0 * sigma ** 2)))
-
-# 		nodule_x, nodule_y = position[0], position[1]
-
-# 		im[nodule_y - 25: nodule_y + 25, nodule_x - 25: nodule_x + 25] += nodule * intensity
-
-
-
-# 		return im
-
-
-
-# 	def __len__(self):
-# 		if self.reg:
-# 			return self.metadata["patient_n"].unique().shape[0]
-# 		return self.metadata.shape[0]
-
-
-# 	def __getitem__(self,index):
-
-# 		if not self.reg:
-
-# 			npy_idx = self.metadata["npy_idx"].iloc[index] - 1
-# 			im = self.data[int(npy_idx)]
-# 		else:
-# 			patient_rows = self.metadata[self.metadata["patient_n"] == self.metadata["patient_n"].unique()[index]]
-
-
-# 			# print(patient_rows, index)
-# 			npy_idx = random.sample(list(patient_rows["npy_idx"]), 1)[0]
-
-# 			im = self.data[npy_idx - 1]
-			
-
-# 		volume = Image.fromarray(im)
-# 		# annotations = self.annotations.iloc[index,0].as_matrix()
-# 		# annotations = annotations.astype('float').reshape(-1,2)
-# 		sample = volume#[np.newaxis, ...]
-
-# 		if self.transform:
-# 			sample = self.transform(sample)
-
-# 		return sample
-
-# 	def get_nodule_mask(self, index):
-
-# 		if not self.reg:
-
-# 			npy_idx = self.metadata["npy_idx"].iloc[index] - 1
-# 			mask = self.masks[int(npy_idx)]
-# 		else:
-# 			patient_rows = self.metadata[self.metadata["patient_n"] == self.metadata["patient_n"].unique()[index]]
-
-
-# 			# prior_network(patient_rows, index)
-# 			npy_idx = random.sample(list(patient_rows["npy_idx"]), 1)[0]
-
-# 			mask = self.masks[npy_idx - 1]
-# 		return mask
-
-
-# def train_discriminator(discriminator, ):
-
 
 
 parser = ArgumentParser(description='Train VAEAC to inpaint.')
@@ -252,6 +107,7 @@ parser.add_argument('--model_dir', type=str, action='store', default="vae_models
 parser.add_argument('--exp', type=str)
 parser.add_argument('--ckpt', type=str, default="-1")
 parser.add_argument('--wandb', action='store_true')
+parser.add_argument('--post_proc', action='store_true')
 
 parser.add_argument('--body_part', type=str, default="chest")
 parser.add_argument('--scale_factor', type=float, default=1)
@@ -623,7 +479,11 @@ validation_dataset = BodyPartDataset(split="train" if args.test_batch else "test
 	cond=cond,
 	nodule=True,
 	test_batch=args.test_batch, 
-	real_labels=args.real_labels)
+	real_labels=args.real_labels,
+	store_full_volume=True,
+	sliding_window=True,
+	return_volumes=True
+	)
 
 
 
@@ -698,7 +558,7 @@ if exists(join(args.model_dir, 'last_checkpoint_{}.tar'.format(args.exp))):
 							map_location=location)
 	model.load_state_dict(checkpoint['model_state_dict'])
 	optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-	validation_iwae = checkpoint['validation_iwae']
+	validation_iwae = checkpoint['rec_loss']
 	train_vlb = checkpoint['train_vlb']
 	start_epoch = checkpoint['epoch']
 
@@ -731,7 +591,7 @@ def make_checkpoint():
 		'epoch': epoch,
 		'model_state_dict': model.state_dict(),
 		'optimizer_state_dict': optimizer.state_dict(),
-		'validation_iwae': validation_iwae,
+		'rec_loss': validation_iwae,
 		'train_vlb': train_vlb,
 	}, filename + '.bak')
 
@@ -872,16 +732,22 @@ for epoch in range(start_epoch, args.epochs):
 	# print(epsilon,"--------------------")
 	with torch.no_grad():
 		#### make this return a dict
-		metrics_dict = get_validation_iwae(val_dataloader,
-									   batch_size, 
-									   model,
-									   args.validation_iwae_num_samples,
-									   verbose, middle_mask=args.hm,
-									   compute_auroc=not args.test_batch)
+
+
+		metrics_dict = get_validation_score(validation_dataset,
+			model,
+			post_proc=args.post_proc)
+		# metrics_dict = get_validation_iwae(val_dataloader,
+		# 							   batch_size, 
+		# 							   model,
+		# 							   args.validation_iwae_num_samples,
+		# 							   verbose, middle_mask=args.hm,
+		# 							   compute_auroc=not args.test_batch)
 
 									   # compute_auroc=(epoch + 1) % 20 == 0)
+		validation_iwae.append(metrics_dict["rec_loss"])
 
-		validation_iwae.append(metrics_dict["val_iwae"])
+		# validation_iwae.append(metrics_dict["val_iwae"])
 		train_vlb.append(avg_vlb)
 		# print(recs.shape, masks.shape, imgs.shape, "=========")
 
@@ -896,7 +762,7 @@ for epoch in range(start_epoch, args.epochs):
 		# consistent even if the script is interrupted
 		# in the middle of copying
 
-		if max(validation_iwae[::-1]) <= metrics_dict["val_iwae"]:
+		if max(validation_iwae[::-1]) <= metrics_dict["rec_loss"]:
 			src_filename = join(args.model_dir, 'last_checkpoint_{}.tar'.format(args.exp))
 			dst_filename = join(args.model_dir, 'best_checkpoint_{}.tar'.format(args.exp))
 			copy(src_filename, dst_filename + '.bak')
@@ -907,14 +773,14 @@ for epoch in range(start_epoch, args.epochs):
 				'epoch': epoch,
 				'model_swatate_dict': model.state_dict(),
 				'optimizer_state_dict': optimizer.state_dict(),
-				'validation_iwae': metrics_dict["val_iwae"],
+				'rec_loss': metrics_dict["rec_loss"],
 				'train_vlb': train_vlb,
-			},  'vaeac_models/{}_{}.tar'.format(args.exp, epoch))
+			},  'vae_models/{}_{}.tar'.format(args.exp, epoch))
 			
 
 		if verbose:
 			print(file=stderr)
-			print(file=stderr)
+			# print(file=stderr)
 
 	train_images = []
 	radius = args.channels // 2
@@ -934,57 +800,81 @@ for epoch in range(start_epoch, args.epochs):
 	train_images = Image.fromarray(train_images)#.save("recs/{}_{}.png".format(args.exp, epoch))
 
 
-	images = []
-	for i in range(1 if args.test_batch else min(20, metrics_dict["batch"].shape[0])):
-		# if metrics_dict["nodule_recs"][i].shape[radius] == 1:
-		canvas = torch.cat((metrics_dict["batch"][i][radius].cpu(), 
-			metrics_dict["recs"][i][radius].cpu(), 
-			metrics_dict["rec_loss_t"][i][radius].cpu() * 5, 
-			metrics_dict["batch_nodule"][i][radius].cpu(), 
-			metrics_dict["batch_labels"][i][radius].cpu(), 
-			metrics_dict["nodule_recs"][i][radius].cpu(), 
-			metrics_dict["nodule_rec_loss_t"][i][radius].cpu() * 5), 1)
+	# images = []
+	# for i in range(1 if args.test_batch else min(20, metrics_dict["batch"].shape[0])):
+	# 	# if metrics_dict["nodule_recs"][i].shape[radius] == 1:
+	# 	canvas = torch.cat((metrics_dict["batch"][i][radius].cpu(), 
+	# 		metrics_dict["recs"][i][radius].cpu(), 
+	# 		metrics_dict["rec_loss_t"][i][radius].cpu() * 5, 
+	# 		metrics_dict["batch_nodule"][i][radius].cpu(), 
+	# 		metrics_dict["batch_labels"][i][radius].cpu(), 
+	# 		metrics_dict["nodule_recs"][i][radius].cpu(), 
+	# 		metrics_dict["nodule_rec_loss_t"][i][radius].cpu() * 5), 1)
 
-		images.append(canvas)
+	# 	images.append(canvas)
 
-	print(metrics_dict["batch"][i][radius].cpu().max(),"-----------")
-	images = torch.cat(images, 0).clamp(0, 1)
-	images = images.unsqueeze(0).repeat(3, 1, 1).cpu().numpy() * 255
-	images = np.rollaxis(images.astype(np.uint8), 0, 3)
-	images = Image.fromarray(images)#.save("recs/{}_{}.png".format(args.exp, epoch))
+	images = torch.cat((metrics_dict["batch_nodule"], metrics_dict["batch_labels"], metrics_dict["nodule_rec_loss_t"] * 5, metrics_dict["nodule_recs"]), 2)
+	images = images.reshape(-1, 256 * 4).clamp(0, 1)
+
+
+	log_d = {
+		"train_loss/train_vlb": avg_vlb,
+		"train_loss/train_rl": rec_loss.sum(-1).sum(-1).sum(-1).mean().item(),
+		"train_loss/train_kl": kl.item(),
+		"val_loss/val_rl": metrics_dict["rec_loss"],
+        "reconstructions/validation":[wandb.Image(images)],
+        "reconstructions/train":[wandb.Image(train_images)],
+
+        "metrics/auroc": metrics_dict["auroc"],
+        "metrics/auprc": metrics_dict["auprc"],
+        "metrics/sensitivity": metrics_dict["sensitivity"],
+        "metrics/specificity": metrics_dict["specificity"],
+        "epsilon": epsilon,
+        "epoch": epoch
+	}
+
+		# for i in range(args.channels):
+		# 	log_d["channel/train_channel_loss_{}".format(i)] = channel_loss[i].item()
+		# 	log_d["channel/val_channel_loss_{}".format(i)] = metrics_dict["channel_loss"][i].item()
+
+	# # print(metrics_dict["batch"][i][radius].cpu().max(),"-----------")
+	# # images = torch.cat(images, 0).clamp(0, 1)
+	# images = images.unsqueeze(0).repeat(3, 1, 1).cpu().numpy() * 255
+	# images = np.rollaxis(images.astype(np.uint8), 0, 3)
+	# images = Image.fromarray(images)#.save("recs/{}_{}.png".format(args.exp, epoch))
 	
-	if not args.validate_only:
-		# canvas = torch.cat((imgs[i][0], masks[i][0], recs[i][0]), 1)
-		log_d = {
-			"train_loss/train_vlb": avg_vlb,
-			"train_loss/train_rl": rec_loss.sum(-1).sum(-1).sum(-1).mean().item(),
-			"train_loss/train_kl": kl.item(),
-			"val_loss/val_iwae": metrics_dict["val_iwae"],
-			"val_loss/val_rl": metrics_dict["rec_loss"],
-			"val_loss/val_kl": metrics_dict["kls"].mean(),
-	        "reconstructions/validation":[wandb.Image(images)],
-	        "reconstructions/train":[wandb.Image(train_images)],
+	# if not args.validate_only:
+	# 	# canvas = torch.cat((imgs[i][0], masks[i][0], recs[i][0]), 1)
+	# 	log_d = {
+	# 		"train_loss/train_vlb": avg_vlb,
+	# 		"train_loss/train_rl": rec_loss.sum(-1).sum(-1).sum(-1).mean().item(),
+	# 		"train_loss/train_kl": kl.item(),
+	# 		"val_loss/val_iwae": metrics_dict["val_iwae"],
+	# 		"val_loss/val_rl": metrics_dict["rec_loss"],
+	# 		"val_loss/val_kl": metrics_dict["kls"].mean(),
+	#         "reconstructions/validation":[wandb.Image(images)],
+	#         "reconstructions/train":[wandb.Image(train_images)],
 
-	        "metrics/auroc": metrics_dict["auroc"],
-	        "metrics/auprc": metrics_dict["auprc"],
-	        "metrics/sensitivity": metrics_dict["sensitivity"],
-	        "metrics/specificity": metrics_dict["specificity"],
-	        "epsilon": epsilon,
-	        "epoch": epoch
-		}
+	#         "metrics/auroc": metrics_dict["auroc"],
+	#         "metrics/auprc": metrics_dict["auprc"],
+	#         "metrics/sensitivity": metrics_dict["sensitivity"],
+	#         "metrics/specificity": metrics_dict["specificity"],
+	#         "epsilon": epsilon,
+	#         "epoch": epoch
+	# 	}
 
-		for i in range(args.channels):
-			log_d["channel/train_channel_loss_{}".format(i)] = channel_loss[i].item()
-			log_d["channel/val_channel_loss_{}".format(i)] = metrics_dict["channel_loss"][i].item()
+	# 	for i in range(args.channels):
+	# 		log_d["channel/train_channel_loss_{}".format(i)] = channel_loss[i].item()
+	# 		log_d["channel/val_channel_loss_{}".format(i)] = metrics_dict["channel_loss"][i].item()
 
-	else:
-		log_d = {
-	        "reconstructions":[wandb.Image(images)],
-	        "metrics/auroc": metrics_dict["auroc"],
-	        "metrics/auprc": metrics_dict["auprc"],
-			"val_loss/val_iwae": metrics_dict["val_iwae"],
-	        "epoch": epoch,
-			"val_loss/val_rl": metrics_dict["rec_loss"],
-			"val_loss/val_kl": metrics_dict["kls"].mean(),
-		}			
+	# else:
+	# 	log_d = {
+	#         "reconstructions":[wandb.Image(images)],
+	#         "metrics/auroc": metrics_dict["auroc"],
+	#         "metrics/auprc": metrics_dict["auprc"],
+	# 		"val_loss/val_iwae": metrics_dict["val_iwae"],
+	#         "epoch": epoch,
+	# 		"val_loss/val_rl": metrics_dict["rec_loss"],
+	# 		"val_loss/val_kl": metrics_dict["kls"].mean(),
+	# 	}			
 	wandb.log(log_d)
