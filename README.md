@@ -3,7 +3,7 @@
 ## Preprocessing
 
 ### 1. Data formatting 
-  Call `preprocess/read_dicoms.py`
+  Call `preprocess/read_dicoms.py`. Based on the data that was shared, each directory seemed to contain a few 
 
   The wbMRI images are stored as png files, with one directory per volume.
   e.g. 
