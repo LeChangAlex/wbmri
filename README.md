@@ -17,9 +17,12 @@ e.g.
 
 1. Data formatting 
  
+ 
 2. Histogram equalization, N4 Bias Correction, Noise removal
 
-Call preprocess/preprocess.py with argument,
+  Call preprocess/preprocess.py with argument the directory containing volume directories
+
+  e.g. python preprocess/preprocess.py ./volumes
 
 
 
