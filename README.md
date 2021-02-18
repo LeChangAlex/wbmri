@@ -1,4 +1,4 @@
-# wbmri
+# Wb-MRI Cancer Detection Pipeline
 
 ## Preprocessing
 
