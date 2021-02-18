@@ -15,7 +15,7 @@ e.g.
 
 
 
-1. Data formatting 
+### Data formatting 
  
  
 2. Histogram equalization, N4 Bias Correction, Noise removal
