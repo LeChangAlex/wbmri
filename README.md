@@ -2,11 +2,8 @@
 
 ## Preprocessing
 
-
-
-
 ### 1. Data formatting 
-  Call preprocess/
+  Call `preprocess/preprocess.py`
 
   The wbMRI images are stored as png files, with one directory per volume.
   e.g. 
