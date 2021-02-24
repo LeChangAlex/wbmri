@@ -8,6 +8,8 @@
   Call `preprocess/read_dicoms.py PATH_TO_DICOM_ROOT png_volumes`.
   
   PATH_TO_DICOM_ROOT should be structured like this:
+  
+  
     - PATH_TO_DICOM_ROOT/volume_1/1.dcm
     - PATH_TO_DICOM_ROOT/volume_1/2.dcm
     - ...
