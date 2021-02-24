@@ -3,17 +3,31 @@
 ## Preprocessing
 
 ### 1. Data formatting 
-  Call `preprocess/read_dicoms.py`. Based on the data that was shared, each directory seemed to contain a few 
+  Based on the data that was shared, each directory seemed to contain a few volumes. 
+  The folder with stitched wbMRI DICOM's should be moved into a separate directory.
+  Call `preprocess/read_dicoms.py PATH_TO_DICOM_ROOT png_volumes`.
+  
+  PATH_TO_DICOM_ROOT should be structured like this:
+  
+  
+    - PATH_TO_DICOM_ROOT/volume_1/1.dcm
+    - PATH_TO_DICOM_ROOT/volume_1/2.dcm
+    - ...
+
+    - PATH_TO_DICOM_ROOT/volume_2/1.dcm
+    - PATH_TO_DICOM_ROOT/volume_2/2.dcm
+    - ...
+
 
   The wbMRI images are stored as png files, with one directory per volume.
   e.g. 
   
-    - volume_1/1.png
-    - volume_1/2.png
+    - png_volumes/volume_1/1.png
+    - png_volumes/volume_1/2.png
     - ...
 
-    - volume_2/1.png
-    - volume_2/2.png
+    - png_volumes/volume_2/1.png
+    - png_volumes/volume_2/2.png
     - ...
 
 
