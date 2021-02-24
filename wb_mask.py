@@ -36,6 +36,8 @@ from opacus.dp_model_inspector import DPModelInspector
 import skimage.io
 import matplotlib.pyplot as plt
 
+from train_utils import fast_auprc, fast_auc2, post_proc
+
 def L1L(batch, target, reduction="none"):
     return  nn.L1Loss(reduction=reduction)(batch, target)
 
@@ -47,7 +49,7 @@ def L2L(batch, target, reduction="none"):
 
 parser = ArgumentParser(description='Train VAEAC to inpaint.')
 
-parser.add_argument('--model_dir', type=str, action='store', default="vaeac_models",
+parser.add_argument('--model_dir', type=str, action='store', default="vae_models",
 					help='Directory with model.py. ' +
 						 'It must be a directory in the root ' +
 						 'of this repository. ' +
@@ -63,8 +65,8 @@ parser.add_argument('--legs_model', type=str, default="6")
 parser.add_argument('--channels', type=int, action='store', default=5)
 parser.add_argument('--z_dim', type=int, action='store', default=64)
 
-parser.add_argument('--chest_ckpt', type=str, default="-1")
-parser.add_argument('--legs_ckpt', type=str, default="-1")
+parser.add_argument('--chest_ckpt', type=str, default="condyzswfixedy_180.tar")
+parser.add_argument('--legs_ckpt', type=str, default="legs_180.tar")
 
 parser.add_argument('--discriminator', action='store_true')
 
@@ -73,8 +75,8 @@ args = parser.parse_args()
 
 model_module = import_module(args.model_dir + '.model')
 
-chest_cond = ["z"]
-real_labels = False
+chest_cond = ["z", "y"]
+real_labels = True
 n_outc = args.channels
 
 if args.chest_model == "6":
@@ -108,10 +110,11 @@ chest_model = VAE(
 	cond_method=chest_cond_method
 )
 
-checkpoint = torch.load(join(args.model_dir, 'last_checkpoint_{}.tar'.format(args.chest_ckpt)),
+checkpoint = torch.load(join(args.model_dir, args.chest_ckpt),
 							map_location="cuda")
 
-chest_model.load_state_dict(checkpoint['model_state_dict'])
+# chest_model.load_state_dict(checkpoint['model_state_dict'])
+chest_model.load_state_dict(checkpoint['model_swatate_dict'])
 
 chest_model = chest_model.cuda()
 
@@ -124,7 +127,9 @@ chest_dataset = BodyPartDataset(split="test",
 	body_part="chest",
 	real_labels=real_labels,
 	store_full_volume=True,
-	sliding_window=True)
+	sliding_window=True,
+	store_full_labels=True,
+	n_volume_slices=40)
 
 
 # Legs model
@@ -157,10 +162,11 @@ legs_model = VAE(
 	cond_method=legs_cond_method
 )
 
-checkpoint = torch.load(join(args.model_dir, 'last_checkpoint_{}.tar'.format(args.legs_ckpt)),
+checkpoint = torch.load(join(args.model_dir, args.legs_ckpt),
 							map_location="cuda")
 
-legs_model.load_state_dict(checkpoint['model_state_dict'])
+# chest_model.load_state_dict(checkpoint['model_state_dict'])
+legs_model.load_state_dict(checkpoint['model_swatate_dict'])
 
 legs_model = legs_model.cuda()
 
@@ -173,52 +179,82 @@ legs_dataset = BodyPartDataset(split="test",
 	body_part="legs",
 	real_labels=real_labels,
 	store_full_volume=True,
-	sliding_window=True)
+	sliding_window=True,
+	store_full_labels=True)
 
 
 
-
-for i in range(len(chest_dataset)):
-	full_im, chest_mask, (l_x, u_x, l_y, u_y), label, nodule_vol = wb_mask(chest_dataset, i, chest_model)
-
-	skimage.io.imsave("wb_masks/nodule_im_{}.png".format(i), nodule_vol.reshape(-1, 256))
-
-	anomaly_mask = torch.zeros_like(full_im)
-	anomaly_mask[:, :anomaly_mask.shape[1] // 2, l_x: u_x] += chest_mask
-
-	full_im_label = torch.zeros_like(full_im)
-	full_im_label[:, :anomaly_mask.shape[1] // 2, l_x: u_x] = label
-
-	_, legs_mask, _, _, _ = wb_mask(legs_dataset, i, legs_model)
+# def validate():
+plot = False
+flat_losses = []
+flat_labels = []
 
 
-
-	anomaly_mask[:, anomaly_mask.shape[1] // 2:, :] += legs_mask * 0.5 ############# to remove
-
-
-	heatmap = full_im.clone().unsqueeze(0).repeat(3, 1, 1, 1)
-	heatmap[0] += anomaly_mask	
-
-	# canvas = torch.cat((full_im.reshape(-1, full_im.shape[2]), anomaly_mask.reshape(-1, full_im.shape[2])
+for i in tqdm(range(len(chest_dataset))):
 
 
-	canvas = torch.cat((full_im.reshape(-1, full_im.shape[2]), 
-		anomaly_mask.reshape(-1, full_im.shape[2]), 
-		full_im_label.reshape(-1, full_im.shape[2])), 1)
+	full_im, full_label, chest_mask, (l_x, u_x, l_y, u_y), label, nodule_vol, recs, vn = wb_mask(chest_dataset, i, chest_model, full_res_mask=False)
+	# if vn in [540]:
+	# 	continue	
+	if post_proc:
+		chest_mask = post_proc(chest_mask, recs, nodule_vol)
 
-	# anomaly_mask = anomaly_mask.reshape()
+	# print(chest_mask.shape, label.shape, nodule_vol.shape, recs.shape, "===========")
+	# skimage.io.imsave("wb_masks/nodule_im_{}.png".format(i), nodule_vol.reshape(-1, 256))
 
 
 
-	# anomaly_mask = anomaly_mask.permute(1, 2, 3, 0)
+	red_label = nodule_vol.clone().unsqueeze(0).repeat(3, 1, 1, 1)
+
+	red_label[0, label > 0] = 1 
+
+	red_label = red_label.permute(1, 2, 3, 0)
+
+	nodule_idx = np.argwhere(label.sum(-1).sum(-1)).reshape(-1)
 
 
-	skimage.io.imsave("wb_masks/test.png", canvas)
+	if plot:
+		for n in nodule_idx:
 
-	# using tuple unpacking for multiple Axes
-	fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(50,50))
-	ax1.imshow(full_im.reshape(-1, full_im.shape[2]), cmap="gray")
-	ax2.imshow(chest_mask[25] * 5, cmap="gray")
-	ax3.imshow(anomaly_mask[25])
 
-	fig.savefig('wb_masks/mask_{}.png'.format(i))
+			fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(10, 15))
+			ax1.imshow(nodule_vol[n], cmap="gray")
+			ax2.imshow(red_label[n])
+			ax3.imshow(chest_mask[n], cmap="gray")
+			ax4.imshow(recs[n], cmap="gray")
+
+			fig.savefig('wb_masks/chest_mask_{}_{}.png'.format(vn, n))
+
+			fig.clf()
+			plt.clf()
+			plt.close()
+
+	flat_losses.append(chest_mask.reshape(-1))
+	flat_labels.append(label.reshape(-1))
+
+	print(label.max(), "label max")
+
+print("auprc", fast_auprc(torch.cat(flat_losses), torch.cat(flat_labels)))
+print("auroc", fast_auc2(torch.cat(flat_losses), torch.cat(flat_labels)))
+
+
+	# full res
+	# anomaly_mask = torch.zeros_like(full_im)
+	# anomaly_mask[:, :anomaly_mask.shape[1] // 2, l_x: u_x] += chest_mask
+
+	# _, _, legs_mask, _, _, _, recs, vn = wb_mask(legs_dataset, i, legs_model, full_res_mask=True)
+
+
+	# anomaly_mask[:, anomaly_mask.shape[1] // 2:, :] += legs_mask * 0.5 ############# to remove
+
+
+	# red_label = full_im.clone()
+	# red_label = full_im.unsqueeze(0).repeat(3, 1, 1, 1)
+	# # print(red_label.shape, (full_label>0).shape)
+
+
+	# red_label[0, full_label > 0] = 1 
+
+	# red_label = red_label.permute(1, 2, 3, 0)
+
+	# nodule_idx = np.argwhere(full_label.sum(-1).sum(-1)).reshape(-1)

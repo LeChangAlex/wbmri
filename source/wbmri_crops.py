@@ -36,10 +36,20 @@ pd.set_option('display.max_columns', None)
 
 
 # 	def get_lowres(self):
+def read_slice(vn, s):
+	try:
 
+		volume_slice = io.imread("/datasets/wbmri/preproc5/volume_{}/{}.png".format(vn, s), as_gray=True)
+		return volume_slice
+	except:
+		pass
 
+	try:
 
-
+		volume_slice = io.imread("/datasets/wbmri/preproc5_bright/volume_{}/{}.png".format(vn, s), as_gray=True)
+		return volume_slice
+	except:
+		pass
 
 
 def read_png_volume(dir, transform=None):
@@ -239,7 +249,7 @@ def real_label_volume(label_paths, im):
 
 
 def get_label_df():
-	return pd.read_pickle("/datasets/wbmri/label_df.pkl")
+	return pd.read_pickle("/datasets/wbmri/preproc_label_df.pkl")
 
 def find_vol_path(row):
 
@@ -263,7 +273,7 @@ class BodyPartDataset(Dataset):
 	def __init__(self, split="train", body_part="head", transform=None, vol_size=None, 
 		all_slices=False, n_slices=1, real_labels=False, cond_features=False, cond_noise=False, 
 		return_n=False, cond=[], nodule=False, test_batch=False, multi_ch_nodule=False, sliding_window=False,
-		store_full_volume=False, return_volumes=False):
+		store_full_volume=False, return_volumes=False, store_full_labels=False, n_volume_slices=20):
 
 		def exists(i):
 			
@@ -304,7 +314,7 @@ class BodyPartDataset(Dataset):
 		self.sliding_window = sliding_window
 
 		self.return_volumes = return_volumes
-
+		self.store_full_labels = store_full_labels
 		# TODO: Implement function which returns df
 		# with cols [volume_n, age, sex, weight]
 		self.metadata = pd.read_csv("/datasets/wbmri/anonym_wbmri_metadata.csv")
@@ -334,10 +344,12 @@ class BodyPartDataset(Dataset):
 		# remove rows with no paths
 		self.metadata = self.metadata[self.metadata["volume_path"].apply(lambda x: x is not None)]
 		
+		# remove rows with no coords
+		self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
+		
 		# add n_slice column 
 		self.metadata["n_slices"] = self.metadata.apply(count_slices, 1)
 
-		# self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
 		
 		self.metadata = self.metadata.reset_index()
 
@@ -352,13 +364,14 @@ class BodyPartDataset(Dataset):
 		self.cond = cond
 		self.volumes = []
 		self.nodule_volumes = []
+		self.full_labels = []
 		self.labels = []
 		self.volume_n = []
 
 		self.slices = []
 		self.test_batch = test_batch
 		self.radius = n_slices // 2
-
+		self.n_volume_slices = n_volume_slices
 
 		# correct_crop_list = os.listdir("/datasets/wbmri/headless_preproc_crops/")
 
@@ -368,7 +381,7 @@ class BodyPartDataset(Dataset):
 		self.masks = []
 
 		
-		for index in tqdm(range(3)):#len(self.metadata))):
+		for index in tqdm(range(len(self.metadata))):
 
 			# print("b========================")
 			n = self.metadata["volume_n"][index]
@@ -400,22 +413,26 @@ class BodyPartDataset(Dataset):
 
 			if self.store_full_volume:
 				full_im = im.clone()
+				self.full_volumes.append(full_im)
+
 
 			if self.body_part == "legs":
-				left_im = im[:, im.shape[1] // 2:, :im.shape[2] // 2]
-				right_im = im[:, im.shape[1] // 2:, im.shape[2] // 2:]
-				
+				# left_im = im[:, im.shape[1] // 2:, :im.shape[2] // 2]
+				# right_im = im[:, im.shape[1] // 2:, im.shape[2] // 2:]
+				im =  im[:, im.shape[1] // 2:]
 
 				size_h = int(im.shape[1] * 256 / im.shape[2])
 
+				im = im.unsqueeze(0)
+				im = nn.functional.interpolate(im.float(), size=(size_h, 512), mode="bicubic", align_corners=False).squeeze(0).int()
 				
-				left_im = left_im.unsqueeze(0)
-				left_im = nn.functional.interpolate(left_im.float(), size=(size_h, 256), mode="bicubic", align_corners=False).squeeze(0).int()
+				# left_im = left_im.unsqueeze(0)
+				# left_im = nn.functional.interpolate(left_im.float(), size=(size_h, 256), mode="bicubic", align_corners=False).squeeze(0).int()
 			
-				right_im = right_im.unsqueeze(0)
-				right_im = nn.functional.interpolate(right_im.float(), size=(size_h, 256), mode="bicubic", align_corners=False).squeeze(0).int()
+				# right_im = right_im.unsqueeze(0)
+				# right_im = nn.functional.interpolate(right_im.float(), size=(size_h, 256), mode="bicubic", align_corners=False).squeeze(0).int()
 
-				im = (left_im, right_im)
+				# im = (left_im, right_im)
 
 			elif self.body_part == "chest":
 
@@ -439,7 +456,6 @@ class BodyPartDataset(Dataset):
 
 
 			self.volumes.append(im)
-			self.full_volumes.append(full_im)
 
 			# print(self.real_labels)
 
@@ -448,7 +464,6 @@ class BodyPartDataset(Dataset):
 					nodule_im = im
 
 					label = real_label_volume(self.metadata["label_paths"][index], im)
-
 
 					# if not self.store_full_volume:					
 					# 	h = 0
@@ -463,6 +478,12 @@ class BodyPartDataset(Dataset):
 
 
 					# store resized chest label
+					if self.store_full_labels:
+						full_label = label.clone()
+						self.full_labels.append(full_label)
+
+
+						# print(n, full_label.shape)
 					if self.body_part == "chest":
 
 						nodule_im = im
@@ -472,18 +493,23 @@ class BodyPartDataset(Dataset):
 
 					elif self.body_part == "legs":
 						
-						left_label = label[:, label.shape[1] // 2:, :label.shape[2] // 2]
-						right_label = label[:, label.shape[1] // 2:, label.shape[2] // 2:]
+
+
+						label = label[:, label.shape[1] // 2:].unsqueeze(0)
+						label = nn.functional.interpolate(label.float(), size=(size_h, 512), mode="nearest").squeeze(0).int()
+
+						# left_label = label[:, label.shape[1] // 2:, :label.shape[2] // 2]
+						# right_label = label[:, label.shape[1] // 2:, label.shape[2] // 2:]
 				
 
-						left_label = left_label.unsqueeze(0)
-						left_label = nn.functional.interpolate(left_label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
+						# left_label = left_label.unsqueeze(0)
+						# left_label = nn.functional.interpolate(left_label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
 					
-						right_label = right_label.unsqueeze(0)
-						right_label = nn.functional.interpolate(right_label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
+						# right_label = right_label.unsqueeze(0)
+						# right_label = nn.functional.interpolate(right_label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
 
-						nodule_im = im
-						label = (left_label, right_label)
+						# nodule_im = im
+						# label = (left_label, right_label)
 
 
 
@@ -502,7 +528,7 @@ class BodyPartDataset(Dataset):
 				self.nodule_volumes.append(nodule_im)
 				self.labels.append(label)
 
-			self.slices += [(index, n, s, sex, weight, age, n_slices) for s in range(max(n_slices - 24, 1 + self.radius), n_slices - 2 - self.radius)]
+			self.slices += [(index, n, s, sex, weight, age, n_slices) for s in range(max(n_slices - self.n_volume_slices, 1 + self.radius), n_slices - 2 - self.radius)]
 
 
 		z_list = [n_slices - s for index, n, s, sex, weight, age, n_slices in self.slices]
@@ -514,21 +540,23 @@ class BodyPartDataset(Dataset):
 
 
 	def __len__(self):
-		if self.return_volumes:
-			return len(self.volumes)
-		if self.sliding_window:
-			return len(self.slices)
 
-		if self.all_slices:
+		if self.split == "test":
 			print("size of dataset:", len(self.volumes))
-			return len(self.volumes)#.shape[0]
+			return len(self.volumes)
 
-		print(len(self.slices))
-		if self.test_batch:
-			return 1
 		return len(self.slices)
-		# print(len(self.metadata))
-		# return len(self.metadata)
+		# if self.return_volumes:
+		# 	return len(self.volumes)
+		# if self.sliding_window:
+		# 	return len(self.slices)
+
+		# print(len(self.slices))
+		# if self.test_batch:
+		# 	return 1
+		# return len(self.slices)
+		# # print(len(self.metadata))
+		# # return len(self.metadata)
 
 
 	def get_features(self, sex, weight, age, s, n_slices, height_to_chest):
@@ -622,14 +650,14 @@ class BodyPartDataset(Dataset):
 			# im = im[:, h :h + im.shape[2]]
 
 		elif self.body_part == "legs":
-			left_im, right_im = self.volumes[vn]
+			im = self.volumes[vn]
 
 			if random.random() > 0.5:
 				side = "left"
-				im = left_im
+				im = im[:, :, :im.shape[2] // 2]
 			else:
 				side = "right"
-				im = right_im
+				im = im[:, :, im.shape[2] // 2:]
 
 			im = im[s - self.radius: s + self.radius + 1].float() / 255
 
@@ -649,6 +677,9 @@ class BodyPartDataset(Dataset):
 		if self.sliding_window:
 			h -= l_y
 			# h /= 200
+
+		spacing = s
+
 
 		z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, h)
 
@@ -680,60 +711,7 @@ class BodyPartDataset(Dataset):
 		
 		return im, cond_features
 
-		# if self.all_slices:
-		# 	im = self.volumes[vn][s - self.radius: s + self.radius + 1].float() / 255
 
-		# 	nodule, nodule_mask = self.nodule_volumes[vn][s - self.radius: s + self.radius + 1].float() / 255, self.labels[vn][s - self.radius: s + self.radius + 1].float() / 255
-
-		# else:
-		# 	# slice_dir = "/datasets/wbmri/slice_png_{}_preproc5/volume_{}/".format(self.body_part, n)
-		# 	print(vn, len(self.volumes), "=============")
-
-		# 	im = self.volumes[vn][s - self.radius: s + self.radius + 1].float() / 255
-		# 	# 	slice_dir = "/datasets/wbmri/headless_preproc/volume_{}/".format(n)
-			
-		# 	# else:
-
-		# 	# 	slice_dir = "/datasets/wbmri/slice_png_{}_headless/volume_{}/".format(self.body_part, n)
-
-
-		# 	# all_channels = []
-		# 	# for i in range(-self.radius, self.radius + 1):
-
-		# 	# 	# one_channel = io.imread(slice_dir + "{}.png".format(s + i), as_gray=True)[np.newaxis,...] / 255.0
-
-		# 	# 	one_channel = torch.from_numpy(io.imread(slice_dir + "{}.png".format(s + i), as_gray=True)).unsqueeze(0) / 255.0
-		# 	# 	# one_channel = torch.from_numpy(io.imread(slice_dir + "slice_{}.png".format(s + i), as_gray=True)).unsqueeze(0) / 255.0
-
-		# 	# 	all_channels.append(one_channel)
-		# 	# 	im = torch.cat(all_channels, 0)
-
-
-
-		# 	# if self.nodule:
-		# 	# 	nodule, nodule_mask = insert_nodule(im, multi_ch=self.multi_ch_nodule)
-				
-
-		# 	if self.sliding_window:
-		# 		h = int(random.random() * (im.shape[1] - im.shape[2]))
-
-		# 	im = im[:, h :h + im.shape[2]]#.unsqueeze(0)
-		# 	# im = nn.functional.interpolate(im.float(), size=(256, 256), mode="bicubic", align_corners=False).squeeze(0)
-
-		# if self.transform:
-		# 	im = self.transform(im)
-
-
-		# z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, h)
-
-
-
-		# if self.return_n:
-		# 	return im, cond_features, n, z, sex, age, weight, nodule, nodule_mask
-
-
-		
-		# return im, cond_features
 
 	def ordered_windows(self, index):
 		
@@ -768,28 +746,32 @@ class BodyPartDataset(Dataset):
 
 		slice_numbers = []
 	
-		label = None
+		# label = None
 		nodule_volume = None
-		for s in range(max(n_slices - 24, 1 + self.radius), n_slices - 2 - self.radius):
+		label = self.labels[vn].float() / 255
 
-			if self.body_part == "chest":
-				im = self.nodule_volumes[vn][s - self.radius: s + self.radius + 1].float() / 255
-				label = self.labels[vn].float() / 255
-				nodule_volume = self.nodule_volumes[vn].float() / 255 
+		for s in range(max(n_slices - self.n_volume_slices, 1 + self.radius), n_slices - 2 - self.radius):
+
+			im = self.nodule_volumes[vn][s - self.radius: s + self.radius + 1].float() / 255
+			nodule_volume = self.nodule_volumes[vn].float() / 255 
+			
+			# if self.body_part == "chest":
+			# 	im = self.nodule_volumes[vn][s - self.radius: s + self.radius + 1].float() / 255
+			# 	nodule_volume = self.nodule_volumes[vn].float() / 255 
 				
 
 			
 
 
-			elif self.body_part == "legs":
-				im = torch.cat(self.volumes[vn], 2)
-				im = im[s - self.radius: s + self.radius + 1].float() / 255
+			# elif self.body_part == "legs":
+			# 	# im = torch.cat(self.volumes[vn], 2)
+			# 	im = self.volumes[vn]
+			# 	nodule_volume = im[s - self.radius: s + self.radius + 1].float() / 255
 				
 
 			n_windows = im.shape[1] // 256 + 1
 
 
-			
 			for w in range(n_windows):
 
 				if self.body_part == "chest":
@@ -827,15 +809,21 @@ class BodyPartDataset(Dataset):
 					slice_numbers.append(s)
 
 
+		full_label = None
+		full_im = None
+		if self.store_full_volume:
 
-		full_im = self.full_volumes[vn].float() / 255
-
+			full_im = self.full_volumes[vn].float() / 255
+		if self.store_full_labels:
+			full_label = self.full_labels[vn].float() / 255
+		
+		# print(full_label.shape, "zzzzzzzzzzzzzzzzzzzz")
 		windows = torch.cat(windows, 0)
 		window_features = torch.cat(window_features, 0)
 		
 		resized_h = im.shape[1]
 
-		return windows, full_im, window_features, (l_x, u_x, l_y, u_y), window_heights, slice_numbers, resized_h, window_widths, label, nodule_volume
+		return windows, full_im, full_label, window_features, (l_x, u_x, l_y, u_y), window_heights, slice_numbers, resized_h, window_widths, label, nodule_volume, n
 			
 
 

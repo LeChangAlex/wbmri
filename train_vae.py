@@ -481,9 +481,9 @@ validation_dataset = BodyPartDataset(split="train" if args.test_batch else "test
 	test_batch=args.test_batch, 
 	real_labels=args.real_labels,
 	store_full_volume=True,
-	sliding_window=True,
-	return_volumes=True
-	)
+	sliding_window=True)#,
+	# return_volumes=True
+	# )
 
 
 
@@ -736,7 +736,8 @@ for epoch in range(start_epoch, args.epochs):
 
 		metrics_dict = get_validation_score(validation_dataset,
 			model,
-			post_proc=args.post_proc)
+			post_proc=args.post_proc,
+			plot_fn=args.exp)
 		# metrics_dict = get_validation_iwae(val_dataloader,
 		# 							   batch_size, 
 		# 							   model,
@@ -813,17 +814,24 @@ for epoch in range(start_epoch, args.epochs):
 
 	# 	images.append(canvas)
 
-	images = torch.cat((metrics_dict["batch_nodule"], metrics_dict["batch_labels"], metrics_dict["nodule_rec_loss_t"] * 5, metrics_dict["nodule_recs"]), 2)
-	images = images.reshape(-1, 256 * 4).clamp(0, 1)
+	# images = torch.cat((metrics_dict["batch_nodule"], metrics_dict["batch_labels"], metrics_dict["nodule_rec_loss_t"] * 5, metrics_dict["nodule_recs"]), 2)
+	# images = images.reshape(-1, 256 * 4).clamp(0, 1)
 
 
+
+	# red_label = metrics_dict["batch_nodule"].unsqueeze(0).repeat(3, 1, 1, 1)
+	# red_label[0, metrics_dict["batch_labels"] > 0] = 1 
+	# red_label = red_label.permute(1, 2, 3, 0)
+
+	# print(images.shape, red_label.shape)
 	log_d = {
 		"train_loss/train_vlb": avg_vlb,
 		"train_loss/train_rl": rec_loss.sum(-1).sum(-1).sum(-1).mean().item(),
 		"train_loss/train_kl": kl.item(),
 		"val_loss/val_rl": metrics_dict["rec_loss"],
-        "reconstructions/validation":[wandb.Image(images)],
+        # "reconstructions/validation":[wandb.Image(images)],
         "reconstructions/train":[wandb.Image(train_images)],
+        # "reconstructions/red_label":[wandb.Image(red_label)],
 
         "metrics/auroc": metrics_dict["auroc"],
         "metrics/auprc": metrics_dict["auprc"],

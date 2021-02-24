@@ -11,6 +11,8 @@ from torch.nn.modules.utils import _pair, _triple, _quadruple
 from numba  import jit
 # import tensorflow as tf
 import random
+import skimage
+from scipy import ndimage
 
 def extend_batch(batch, dataloader, batch_size):
 	"""
@@ -84,20 +86,22 @@ def fast_auc2(y_prob, y_true, step=100):
 	auc /= (nfalse * (n - nfalse))
 
 	return auc
-	
-def wb_mask(dataset, index, model, full_res_mask=False):
 
 
-	# for i in range(len(dataset)):
-	windows, full_im, window_features, (l_x, u_x, l_y, u_y), window_heights, slice_numbers, resized_h, window_widths, label, nodule_vol = dataset.ordered_windows(index)
+
+
+
+def wb_mask(dataset, index, model, full_res_mask=False, save_plots=False, prediction_slices=False):
+
+
+	windows, full_im, full_label, window_features, (l_x, u_x, l_y, u_y), window_heights, slice_numbers, resized_h, window_widths, label, nodule_vol, vn = dataset.ordered_windows(index)
 	windows, window_features = windows.cuda(), window_features.cuda()
-
+	
 	with torch.no_grad():
 		iwae, rec_loss, kls, window_recs, rec_loss_t = model.batch_iwae(windows, None, window_features, 1)
 
 
 	radius = windows.shape[1] // 2
-	resized_label = None	
 
 	if dataset.body_part == "chest":
 		predictions = torch.zeros((full_im.shape[0], resized_h, 256))
@@ -125,6 +129,8 @@ def wb_mask(dataset, index, model, full_res_mask=False):
 			predictions[:, next_h :h+256] /= 2
 			recs[:, next_h :h+256] /= 2
 		if full_res_mask:
+
+
 			recs = nn.functional.interpolate(recs.unsqueeze(0).unsqueeze(0), 
 				size=(full_im.shape[0], full_im.shape[1] // 2, u_x - l_x),
 					mode="nearest").squeeze(0).squeeze(0)
@@ -168,6 +174,7 @@ def wb_mask(dataset, index, model, full_res_mask=False):
 
 		if full_res_mask:
 
+
 			predictions = nn.functional.interpolate(predictions.unsqueeze(0).unsqueeze(0), 
 				size=(full_im.shape[0], full_im.shape[1] // 2 + full_im.shape[1] % 2, full_im.shape[2]),
 					mode="nearest").squeeze(0).squeeze(0)
@@ -180,7 +187,20 @@ def wb_mask(dataset, index, model, full_res_mask=False):
 					mode="nearest").squeeze(0).squeeze(0)
 
 
-	return full_im, predictions, (l_x, u_x, l_y, u_y), label, nodule_vol, recs
+	if save_plots:
+		os.makedirs("prediction_masks", exist_ok=True)
+
+
+	if prediction_slices:
+
+		sl = np.unique(prediction_slices)
+
+		predictions = predictions[sl]
+		label = label[sl]
+		recs = recs[sl]
+		nodule_vol = nodule_vol[sl]
+
+	return full_im, full_label, predictions, (l_x, u_x, l_y, u_y), label, nodule_vol, recs, vn
 
 
 
@@ -363,7 +383,7 @@ class MedianPool2d(nn.Module):
 		x = x.contiguous().view(x.size()[:4] + (-1,)).median(dim=-1)[0]
 
 
-def get_validation_score(val_dataset, model, post_proc=False, compute_auroc=True):
+def get_validation_score(val_dataset, model, post_proc=False, compute_auroc=True, plot_fn="test"):
 
 	first = {}
 
@@ -374,12 +394,14 @@ def get_validation_score(val_dataset, model, post_proc=False, compute_auroc=True
 	rand = int(random.random() * len(val_dataset))
 	
 	for i in tqdm(range(len(val_dataset))):
+		full_im, full_label, loss_mask, (l_x, u_x, l_y, u_y), nodule_label, nodule_vol, nodule_recs, vn = wb_mask(val_dataset, i, model, full_res_mask=False)
 
-		full_im, loss_mask, (l_x, u_x, l_y, u_y), nodule_label, nodule_vol, nodule_recs = wb_mask(val_dataset, i, model)
+		# full_im, loss_mask, (l_x, u_x, l_y, u_y), nodule_label, nodule_vol, nodule_recs = wb_mask(val_dataset, i, model)
 	
 
 		if post_proc:
-			postproc_loss_mask = MedianPool3d(kernel_size=(3, 5, 5), stride=1, padding=2)(loss_mask.unsqueeze(0).unsqueeze(0))
+			postproc_loss_mask = post_proc_vol(loss_mask, nodule_recs, nodule_vol)
+			# postproc_loss_mask = MedianPool3d(kernel_size=(3, 5, 5), stride=1, padding=2)(loss_mask.unsqueeze(0).unsqueeze(0))
 			mask_losses.append(postproc_loss_mask.reshape(-1))
 		else:
 			mask_losses.append(loss_mask.reshape(-1))
@@ -389,11 +411,29 @@ def get_validation_score(val_dataset, model, post_proc=False, compute_auroc=True
 
 
 		flat_labels.append(nodule_label.reshape(-1))
-		if i == rand:
-			first["batch_nodule"] = nodule_vol
-			first["batch_labels"] = nodule_label
-			first["nodule_rec_loss_t"] = loss_mask
-			first["nodule_recs"] = nodule_recs
+
+		nodule_idx = np.argwhere(nodule_label.sum(-1).sum(-1)).reshape(-1)
+
+
+		for n in nodule_idx:
+			im = torch.cat((nodule_vol[n], nodule_label[n], loss_mask[n], nodule_recs[n]), 1)
+
+
+			red_label = nodule_vol[n].unsqueeze(0).repeat(3, 1, 1)
+			red_label[0, nodule_label[n] > 0] = 1 
+			red_label = red_label.permute(1, 2, 0)
+
+
+			im = im.unsqueeze(0).repeat(3, 1, 1).permute(1, 2, 0)
+			im = torch.cat((im, red_label), 1).clamp(0, 1)
+			skimage.io.imsave("wb_masks/{}_{}_{}.png".format(plot_fn, vn, n), im)
+
+
+		# if i == rand:
+			# first["batch_nodule"] = nodule_vol
+			# first["batch_labels"] = nodule_label
+			# first["nodule_rec_loss_t"] = loss_mask
+			# first["nodule_recs"] = nodule_recs
 
 
 
@@ -419,6 +459,20 @@ def get_validation_score(val_dataset, model, post_proc=False, compute_auroc=True
 	return first
 
 
+def post_proc_vol(losses, recs, vol):
+
+
+
+	losses[vol < recs] = 0
+
+	losses = ndimage.median_filter(losses, size=(3, 5, 5))
+	losses = torch.from_numpy(losses)
+	# losses = losses.unsqueeze(0).unsqueeze(0)
+	# losses = MedianPool3d(kernel_size=(3, 5, 5), stride=1, padding=(1, 2, 2))(losses).squeeze(0).squeeze(0)
+
+	# assert losses.shape == losses_greater.shape
+
+	return losses
 
 def get_validation_iwae(val_dataloader, 
 						batch_size,
