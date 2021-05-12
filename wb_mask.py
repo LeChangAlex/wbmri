@@ -36,7 +36,7 @@ from opacus.dp_model_inspector import DPModelInspector
 import skimage.io
 import matplotlib.pyplot as plt
 
-from train_utils import fast_auprc, fast_auc2, post_proc
+from train_utils import fast_auprc, fast_auc2, dice, post_proc_vol, get_validation_score
 
 def L1L(batch, target, reduction="none"):
     return  nn.L1Loss(reduction=reduction)(batch, target)
@@ -67,17 +67,24 @@ parser.add_argument('--z_dim', type=int, action='store', default=64)
 
 parser.add_argument('--chest_ckpt', type=str, default="condyzswfixedy_180.tar")
 parser.add_argument('--legs_ckpt', type=str, default="legs_180.tar")
+parser.add_argument('--mode', type=str, default="sample")
 
 parser.add_argument('--discriminator', action='store_true')
+parser.add_argument('--gradcam', action='store_true')
 
 args = parser.parse_args()
 
 
 model_module = import_module(args.model_dir + '.model')
 
-chest_cond = ["z", "y"]
+chest_cond = ["z"]
+# chest_cond = []
+
 real_labels = True
+save_conv_features = True
 n_outc = args.channels
+
+chop = False
 
 if args.chest_model == "6":
 	proposal_network, generative_network, discriminator = model_module.get_vae_networks6(args.channels, 
@@ -107,30 +114,17 @@ chest_model = VAE(
 	generative_network,
 	channels=args.channels,
 	cond=chest_cond,
-	cond_method=chest_cond_method
+	cond_method=chest_cond_method,
+	save_conv_features=save_conv_features	
 )
 
 checkpoint = torch.load(join(args.model_dir, args.chest_ckpt),
 							map_location="cuda")
 
 # chest_model.load_state_dict(checkpoint['model_state_dict'])
-chest_model.load_state_dict(checkpoint['model_swatate_dict'])
+chest_model.load_state_dict(checkpoint['model_state_dict'])
 
 chest_model = chest_model.cuda()
-
-chest_dataset = BodyPartDataset(split="test", 
-	all_slices=True, 
-	n_slices=5, 
-	return_n=True, 
-	cond=chest_cond,
-	nodule=True,
-	body_part="chest",
-	real_labels=real_labels,
-	store_full_volume=True,
-	sliding_window=True,
-	store_full_labels=True,
-	n_volume_slices=40)
-
 
 # Legs model
 legs_cond = []
@@ -148,94 +142,134 @@ elif args.legs_model == "7":
 						metadata_channels=len(legs_cond),
 						discriminator=args.discriminator)
 
-legs_cond_method = "input"
-if args.legs_model in ["7"]:
-	legs_cond_method = "resblock"
+# legs_cond_method = "input"
+# if args.legs_model in ["7"]:
+# 	legs_cond_method = "resblock"
 
 
-legs_model = VAE(
-	L2L,
-	proposal_network,
-	generative_network,
-	channels=args.channels,
-	cond=legs_cond,
-	cond_method=legs_cond_method
-)
+# legs_model = VAE(
+# 	L2L,
+# 	proposal_network,
+# 	generative_network,
+# 	channels=args.channels,
+# 	cond=legs_cond,
+# 	cond_method=legs_cond_method
+# )
 
-checkpoint = torch.load(join(args.model_dir, args.legs_ckpt),
-							map_location="cuda")
+# checkpoint = torch.load(join(args.model_dir, args.legs_ckpt),
+# 							map_location="cuda")
 
-# chest_model.load_state_dict(checkpoint['model_state_dict'])
-legs_model.load_state_dict(checkpoint['model_swatate_dict'])
+# # chest_model.load_state_dict(checkpoint['model_state_dict'])
+# legs_model.load_state_dict(checkpoint['model_swatate_dict'])
 
-legs_model = legs_model.cuda()
+# legs_model = legs_model.cuda()
 
-legs_dataset = BodyPartDataset(split="test", 
+pp = True
+
+if args.mode == "mask":
+	# chest_dataset = BodyPartDataset(split="test", 
+	# all_slices=True, 
+	# n_slices=5, 
+	# return_n=True, 
+	# cond=chest_cond,
+	# nodule=True,
+	# body_part="chest",
+	# real_labels=real_labels,
+	# store_full_volume=True,
+	# sliding_window=True,
+	# store_full_labels=True,
+	# n_volume_slices=40)
+
+	chest_dataset = BodyPartDataset(split="test", 
 	all_slices=True, 
 	n_slices=5, 
 	return_n=True, 
-	cond=legs_cond,
+	cond=chest_cond,
 	nodule=True,
-	body_part="legs",
-	real_labels=real_labels,
+	body_part="chest",
+	real_labels=True,
 	store_full_volume=True,
 	sliding_window=True,
-	store_full_labels=True)
+	store_full_labels=True,
+	n_volume_slices=40,
+	chop=chop)
+
+	plot = True
+	flat_losses = []
+	flat_labels = []
+
+
+	for i in tqdm(range(4, len(chest_dataset))):
+
+		chest_model.reset_conv_features()
+		full_im, full_label, chest_mask, (l_x, u_x, l_y, u_y), label, nodule_vol, recs, vn = wb_mask(chest_dataset, i, chest_model, full_res_mask=False, gradcam=args.gradcam)
+		chest_model.merge_batch_conv_features()
+
+		print(chest_model.conv_features[-1].shape)
+		fig, ax = plt.subplots(8, 8)
+		
+
+		latent_map = chest_model.conv_features[-1].detach().cpu().numpy()
+		# for each batch element/ordered window
+		for j in range(68, 88):#latent_map.shape[0]):
+			
+			# print(len(chest_model.conv_features))
+
+			# for each feature map
+			for k in range(latent_map.shape[1]):
+
+				ax[k // 8][k % 8].imshow(latent_map[j][k], vmin=-3, vmax=3)
+
+			plt.savefig("feature_maps/{}_{}_{}.png".format(i, j, k))
+
+		# if vn in [540]:
+		# 	continue	
+		# if pp:
+			# chest_mask = post_proc(chest_mask, recs, nodule_vol)
+
+		# print(chest_mask.shape, label.shape, nodule_vol.shape, recs.shape, "===========")
+		# skimage.io.imsave("wb_masks/nodule_im_{}.png".format(i), nodule_vol.reshape(-1, 256))
 
 
 
-# def validate():
-plot = False
-flat_losses = []
-flat_labels = []
+		red_label = nodule_vol.clone().unsqueeze(0).repeat(3, 1, 1, 1)
+
+		red_label[0, label > 0] = 1
+
+		red_label = red_label.permute(1, 2, 3, 0)
+
+		# nodule_idx = np.argwhere(label.sum(-1).sum(-1)).reshape(-1)
+		nodule_idx = range(label.shape[0])
+
+		if plot:
+			for n in nodule_idx:
+
+				fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(10, 15))
+				ax1.imshow(nodule_vol[n], cmap="gray")
+				ax2.imshow(red_label[n])
+				ax3.imshow(chest_mask[n], cmap="gray")
+				ax4.imshow(recs[n], cmap="gray")
+
+				fig.savefig('wb_masks/chest_mask_{}_{}.png'.format(vn, n))
+
+				fig.clf()
+				plt.clf()
+				plt.close()
+
+		flat_losses.append(chest_mask.reshape(-1))
+		flat_labels.append(label.reshape(-1))
 
 
-for i in tqdm(range(len(chest_dataset))):
 
+	losses = torch.cat(flat_losses)
+	labels = torch.cat(flat_labels)
+	print("auprc", fast_auprc(losses, labels))
+	print("auroc", fast_auc2(losses, labels))
 
-	full_im, full_label, chest_mask, (l_x, u_x, l_y, u_y), label, nodule_vol, recs, vn = wb_mask(chest_dataset, i, chest_model, full_res_mask=False)
-	# if vn in [540]:
-	# 	continue	
-	if post_proc:
-		chest_mask = post_proc(chest_mask, recs, nodule_vol)
-
-	# print(chest_mask.shape, label.shape, nodule_vol.shape, recs.shape, "===========")
-	# skimage.io.imsave("wb_masks/nodule_im_{}.png".format(i), nodule_vol.reshape(-1, 256))
-
-
-
-	red_label = nodule_vol.clone().unsqueeze(0).repeat(3, 1, 1, 1)
-
-	red_label[0, label > 0] = 1 
-
-	red_label = red_label.permute(1, 2, 3, 0)
-
-	nodule_idx = np.argwhere(label.sum(-1).sum(-1)).reshape(-1)
-
-
-	if plot:
-		for n in nodule_idx:
-
-
-			fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(10, 15))
-			ax1.imshow(nodule_vol[n], cmap="gray")
-			ax2.imshow(red_label[n])
-			ax3.imshow(chest_mask[n], cmap="gray")
-			ax4.imshow(recs[n], cmap="gray")
-
-			fig.savefig('wb_masks/chest_mask_{}_{}.png'.format(vn, n))
-
-			fig.clf()
-			plt.clf()
-			plt.close()
-
-	flat_losses.append(chest_mask.reshape(-1))
-	flat_labels.append(label.reshape(-1))
-
-	print(label.max(), "label max")
-
-print("auprc", fast_auprc(torch.cat(flat_losses), torch.cat(flat_labels)))
-print("auroc", fast_auc2(torch.cat(flat_losses), torch.cat(flat_labels)))
+	for i in range(100):
+		t = i / 100
+		d = dice(losses, labels)
+		print("dice", t, dice)
 
 
 	# full res
@@ -258,3 +292,173 @@ print("auroc", fast_auc2(torch.cat(flat_losses), torch.cat(flat_labels)))
 	# red_label = red_label.permute(1, 2, 3, 0)
 
 	# nodule_idx = np.argwhere(full_label.sum(-1).sum(-1)).reshape(-1)
+elif args.mode == "validate":
+	chest_dataset = BodyPartDataset(split="test", 
+	all_slices=True, 
+	n_slices=5, 
+	return_n=True, 
+	cond=chest_cond,
+	nodule=True,
+	body_part="chest",
+	real_labels=real_labels,
+	store_full_volume=True,
+	sliding_window=True,
+	store_full_labels=True,
+	n_volume_slices=40)
+
+
+	# legs_dataset = BodyPartDataset(split="test", 
+	# 	all_slices=True, 
+	# 	n_slices=5, 
+	# 	return_n=True, 
+	# 	cond=legs_cond,
+	# 	nodule=True,
+	# 	body_part="legs",
+	# 	real_labels=real_labels,
+	# 	store_full_volume=True,
+	# 	sliding_window=True,
+	# 	store_full_labels=True)
+
+	chest_model.eval()
+	metrics_dict = get_validation_score(chest_dataset,
+			chest_model,
+			post_proc=True,
+			plot_fn="",
+			return_losses=True)
+
+	print("mdice", metrics_dict["mdice"])
+
+	print(args.chest_ckpt, "auprc", metrics_dict["auprc"])
+	print(metrics_dict["losses"].shape, metrics_dict["labels"].shape)
+
+
+
+	for j in range(100):
+	
+		d = dice(metrics_dict["mdice"][j])
+
+		print("dice", t, d)
+
+
+elif args.mode == "sample":
+	bs = 1
+	
+	z = torch.normal(torch.zeros((bs, 32, 16, 16)), torch.ones((bs, 32, 16, 16))).cuda()
+
+	for h in range(50):
+
+		wh = -h / 50 
+		metadata = torch.zeros((bs, 2)).cuda() 
+
+		metadata[:, 1] += wh
+		radius = args.channels // 2
+
+
+		sample = chest_model.sample(metadata, z).clip(0, 1).detach().cpu()[:, radius]
+
+		for i in range(bs):
+
+			skimage.io.imsave("samples/sample_{}_{}.png".format(wh, i), sample[i])
+
+elif args.mode == "save":
+
+	chest_dataset = BodyPartDataset(split="test", 
+	all_slices=True, 
+	n_slices=5, 
+	return_n=True, 
+	cond=chest_cond,
+	nodule=True,
+	body_part="chest",
+	real_labels=True,
+	store_full_volume=True,
+	sliding_window=True,
+	store_full_labels=True,
+	n_volume_slices=40,
+	chop=chop)
+
+	plot = True
+	flat_losses = []
+	flat_labels = []
+
+
+	for i in tqdm(range(4, len(chest_dataset))):
+
+		chest_model.reset_conv_features()
+		full_im, full_label, chest_mask, (l_x, u_x, l_y, u_y), label, nodule_vol, recs, vn = wb_mask(chest_dataset, i, chest_model, full_res_mask=False, gradcam=args.gradcam)
+		chest_model.merge_batch_conv_features()
+
+		print(chest_model.conv_features[-1].shape)
+		fig, ax = plt.subplots(8, 8)
+		
+
+		latent_map = chest_model.conv_features[-1].detach().cpu().numpy()
+		# for each batch element/ordered window
+		for j in range(68, 88):#latent_map.shape[0]):
+			
+			# print(len(chest_model.conv_features))
+
+			# for each feature map
+			for k in range(latent_map.shape[1]):
+
+				ax[k // 8][k % 8].imshow(latent_map[j][k], vmin=-3, vmax=3)
+
+			plt.savefig("feature_maps/{}_{}_{}.png".format(i, j, k))
+
+		# if vn in [540]:
+		# 	continue	
+		# if pp:
+			# chest_mask = post_proc(chest_mask, recs, nodule_vol)
+
+		# print(chest_mask.shape, label.shape, nodule_vol.shape, recs.shape, "===========")
+		# skimage.io.imsave("wb_masks/nodule_im_{}.png".format(i), nodule_vol.reshape(-1, 256))
+
+
+
+		red_label = nodule_vol.clone().unsqueeze(0).repeat(3, 1, 1, 1)
+
+		red_label[0, label > 0] = 1
+
+		red_label = red_label.permute(1, 2, 3, 0)
+
+		# nodule_idx = np.argwhere(label.sum(-1).sum(-1)).reshape(-1)
+		nodule_idx = range(label.shape[0])
+
+		if plot:
+			for n in nodule_idx:
+
+				fig, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(10, 15))
+				ax1.imshow(nodule_vol[n], cmap="gray")
+				ax2.imshow(red_label[n])
+				ax3.imshow(chest_mask[n], cmap="gray")
+				ax4.imshow(recs[n], cmap="gray")
+
+				fig.savefig('wb_masks/chest_mask_{}_{}.png'.format(vn, n))
+
+				fig.clf()
+				plt.clf()
+				plt.close()
+
+		flat_losses.append(chest_mask.reshape(-1))
+		flat_labels.append(label.reshape(-1))
+
+
+
+	losses = torch.cat(flat_losses)
+	labels = torch.cat(flat_labels)
+	print("auprc", fast_auprc(losses, labels))
+	print("auroc", fast_auc2(losses, labels))
+
+	for i in range(100):
+		t = i / 100
+		d = dice(losses, labels)
+		print("dice", t, dice)
+
+
+	# full res
+	# anomaly_mask = torch.zeros_like(full_im)
+	# anomaly_mask[:, :anomaly_mask.shape[1] // 2, l_x: u_x] += chest_mask
+
+	# _, _, legs_mask, _, _, _, recs, vn = wb_mask(legs_dataset, i, legs_model, full_res_mask=True)
+
+
+	# anomaly_mask[:, anomaly_mask.shape[1] // 2:, :] += legs_mask * 0.5 ############# to remove

@@ -68,7 +68,7 @@ def read_png_volume(dir, transform=None):
 
 		
 
-def get_crop_coords(return_dict=False):
+def get_crop_coords(fn, return_dict=False):
 
 	l = []
 
@@ -77,7 +77,7 @@ def get_crop_coords(return_dict=False):
 
 	# f = open("/datasets/wbmri/crop_coords/{}_{}.txt".format(mod, bp))
 	# f = open("../../mri_gan_cancer/preprocess/chest_headless_coords.csv")
-	f = open("preprocess/chest_headless_coords.csv")
+	f = open(fn)
 
 
 	# coords_line = f.readline().split(" ")
@@ -233,6 +233,8 @@ def insert_nodule(tensor, intensity=0.7, sigma=6, n_nodule=1, multi_ch=False):
 def real_label_volume(label_paths, im):
 
 	mask = None
+	if not isinstance(label_paths, list) and pd.isna(label_paths):
+		return torch.zeros_like(im)
 
 	for i in range(len(label_paths)):
 		s, path = label_paths[i]
@@ -273,7 +275,7 @@ class BodyPartDataset(Dataset):
 	def __init__(self, split="train", body_part="head", transform=None, vol_size=None, 
 		all_slices=False, n_slices=1, real_labels=False, cond_features=False, cond_noise=False, 
 		return_n=False, cond=[], nodule=False, test_batch=False, multi_ch_nodule=False, sliding_window=False,
-		store_full_volume=False, return_volumes=False, store_full_labels=False, n_volume_slices=20):
+		store_full_volume=False, return_volumes=False, store_full_labels=False, n_volume_slices=40, chop=False):
 
 		def exists(i):
 			
@@ -302,10 +304,17 @@ class BodyPartDataset(Dataset):
 			except:
 				print(fn)
 				return
+
 		self.nodule = nodule
 		self.return_n = return_n
 		self.store_full_volume = store_full_volume
-		self.data_path = "/datasets/wbmri/"
+		if chop:
+			self.data_path = "/datasets/wbmri/"
+			
+		else:
+			self.data_path = "/datasets/wbmri/"
+		
+
 		self.all_slices = all_slices
 
 		self.split = split
@@ -317,36 +326,44 @@ class BodyPartDataset(Dataset):
 		self.store_full_labels = store_full_labels
 		# TODO: Implement function which returns df
 		# with cols [volume_n, age, sex, weight]
-		self.metadata = pd.read_csv("/datasets/wbmri/anonym_wbmri_metadata.csv")
-		self.metadata = self.metadata.fillna("0")
-
-
-		# TODO: Implement function which returns df 
-		# with cols [volume_n, list of tuples of format (slice number, path to slice label)]
-		self.label_df = get_label_df()
-
-		self.coords_dict = get_crop_coords(return_dict=True)
-
-
-		self.metadata = self.metadata.merge(self.label_df, on="volume_n", how="left")
-	
-		if split == "train":
-			self.metadata = self.metadata[pd.isna(self.metadata["label_paths"])]
-		elif split == "test":
-			self.metadata = self.metadata[np.logical_not(pd.isna(self.metadata["label_paths"]))]
+		if chop:
+			self.metadata = pd.read_csv("/cpu008/lechang/wbmri/preprocess/chop_metadata.csv")
+		else:
+			self.metadata = pd.read_csv("/datasets/wbmri/anonym_wbmri_metadata.csv")
 		
-		# add volume_path column
-		self.metadata["volume_path"] = self.metadata.apply(find_vol_path, 1)
+			self.metadata = self.metadata.fillna("0")
 
-		# only include volumes with > 20 slices
-		self.metadata = self.metadata[self.metadata["dim1"].apply(int) > 20]
+
+			# TODO: Implement function which returns df 
+			# with cols [volume_n, list of tuples of format (slice number, path to slice label)]
+			self.label_df = get_label_df()
+
+
+
+			self.metadata = self.metadata.merge(self.label_df, on="volume_n", how="left")
 		
-		# remove rows with no paths
-		self.metadata = self.metadata[self.metadata["volume_path"].apply(lambda x: x is not None)]
+			if split == "train":
+				self.metadata = self.metadata[pd.isna(self.metadata["label_paths"])]
+			elif split == "test":
+				self.metadata = self.metadata[np.logical_not(pd.isna(self.metadata["label_paths"]))]
+			
+			# add volume_path column
+			self.metadata["volume_path"] = self.metadata.apply(find_vol_path, 1)
+
+			# only include volumes with > 20 slices
+			self.metadata = self.metadata[self.metadata["dim1"].apply(int) > 20]
+			
+			# remove rows with no paths
+			self.metadata = self.metadata[self.metadata["volume_path"].apply(lambda x: x is not None)]
+			
+			# remove rows with no coords
+			self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
 		
-		# remove rows with no coords
-		self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
-		
+		if chop:
+			self.coords_dict = get_crop_coords("preprocess/chop_coords.csv", return_dict=True)
+		else:
+			self.coords_dict = get_crop_coords("preprocess/chest_headless_coords.csv", return_dict=True)
+			
 		# add n_slice column 
 		self.metadata["n_slices"] = self.metadata.apply(count_slices, 1)
 
@@ -391,6 +408,19 @@ class BodyPartDataset(Dataset):
 			age = self.metadata["age"][index]
 
 			n_slices = self.metadata["n_slices"][index]
+			spacing = float(self.metadata["slicespacing"][index]) 
+			thickness = float(self.metadata["slicethickness"][index])
+
+			if spacing == 0:
+				spacing = 6
+
+			if thickness == 0:
+				thickness = 6
+
+			slice_spacing = spacing + thickness
+
+
+
 
 			# slice_dir = "/datasets/wbmri/slice_png_chest_headless/volume_{}/".format(n)
 			# n_slices = len([name for name in os.listdir(slice_dir) if name[-4:] == ".png"])
@@ -407,7 +437,7 @@ class BodyPartDataset(Dataset):
 			vol_path = self.metadata["volume_path"][index]
 
 			im = read_png_volume(vol_path, self.transform)
-			
+			full_height = im.shape[1]
 			l_x, u_x, l_y, u_y = self.coords_dict[n]
 			full_im = None
 
@@ -459,6 +489,7 @@ class BodyPartDataset(Dataset):
 
 			# print(self.real_labels)
 
+
 			if self.nodule:
 				if self.real_labels:
 					nodule_im = im
@@ -487,9 +518,15 @@ class BodyPartDataset(Dataset):
 					if self.body_part == "chest":
 
 						nodule_im = im
-						label = label[:, :label.shape[1] // 2, l_x: u_x].unsqueeze(0)
 
-						label = nn.functional.interpolate(label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
+						if self.sliding_window:
+							label = label[:, :label.shape[1] // 2, l_x: u_x].unsqueeze(0)
+
+							label = nn.functional.interpolate(label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
+						# else:
+							# label = label[:, :label.shape[1] // 2, l_x: u_x].unsqueeze(0)
+
+							# label = nn.functional.interpolate(label.float(), size=(size_h, 256), mode="nearest").squeeze(0).int()
 
 					elif self.body_part == "legs":
 						
@@ -517,7 +554,7 @@ class BodyPartDataset(Dataset):
 
 				else:
 					if self.body_part == "chest":
-						nodule_im, mask = insert_nodule_volume(im)
+						nodule_im, label = insert_nodule_volume(im)
 					elif self.body_part == "legs":
 						left_nodule_im, left_mask = insert_nodule_volume(left_im)
 						right_nodule_im, right_mask = insert_nodule_volume(right_im)
@@ -528,20 +565,22 @@ class BodyPartDataset(Dataset):
 				self.nodule_volumes.append(nodule_im)
 				self.labels.append(label)
 
-			self.slices += [(index, n, s, sex, weight, age, n_slices) for s in range(max(n_slices - self.n_volume_slices, 1 + self.radius), n_slices - 2 - self.radius)]
+			self.slices += [(index, n, s, sex, weight, age, n_slices, s * slice_spacing, full_height) for s in range(max(n_slices - self.n_volume_slices, 1 + self.radius), n_slices - 2 - self.radius)]
 
 
-		z_list = [n_slices - s for index, n, s, sex, weight, age, n_slices in self.slices]
+		z_list = [z_coord for index, n, s, sex, weight, age, n_slices, z_coord, full_h in self.slices]
 		self.z_mean, self.z_std = np.mean(z_list), np.std(z_list)
 
 
 
 		print(self.metadata)
+		print(self.z_mean, self.z_std)
 
 
 	def __len__(self):
 
-		if self.split == "test":
+		# if self.split == "test":
+		if self.sliding_window:
 			print("size of dataset:", len(self.volumes))
 			return len(self.volumes)
 
@@ -559,7 +598,7 @@ class BodyPartDataset(Dataset):
 		# # return len(self.metadata)
 
 
-	def get_features(self, sex, weight, age, s, n_slices, height_to_chest):
+	def get_features(self, sex, weight, age, s, n_slices, z_coord, height_to_chest, im_height):
 
 		if sex == "M":
 			sex = 1
@@ -571,7 +610,9 @@ class BodyPartDataset(Dataset):
 		# print(s, n_slices)
 		age = float(age)
 		weight = float(weight)
-		z = n_slices - s # how many slices from the back
+		# z = ((n_slices - s) - self.z_mean) / self.z_std  # how many slices from the back
+		z = (z_coord - self.z_mean) / self.z_std  # how many slices from the back
+
 		if self.cond_noise and self.split == "train":
 			age += np.random.normal(0, 0.5)
 			weight += np.random.normal(0, 2)
@@ -579,11 +620,14 @@ class BodyPartDataset(Dataset):
 
 		age = (age - 12.33) / 3.7
 		weight = (weight - 49.4) / 20.19
-		z = ((n_slices - s) - self.z_mean) / self.z_std  # how many slices from the back
-
-		y = height_to_chest / 300
 
 
+		# this gives better samples
+		y = height_to_chest / im_height
+
+		# y = height_to_chest / im_height
+
+		# print(z, y, "=================")
 		# if self.cond:
 
 
@@ -623,7 +667,7 @@ class BodyPartDataset(Dataset):
 
 		# 	return self.volumes[index], self.volume_n[index]
 	
-		(vn, n, s, sex, weight, age, n_slices) = self.slices[index]
+		(vn, n, s, sex, weight, age, n_slices, z_coord, full_h) = self.slices[index]
 		height = 0
  
 		# print(im.max())
@@ -675,13 +719,13 @@ class BodyPartDataset(Dataset):
 
 
 		if self.sliding_window:
-			h -= l_y
+			h -= l_y * im.shape[1] / (full_h / 2)
 			# h /= 200
 
 		spacing = s
 
 
-		z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, h)
+		z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, z_coord, h, im.shape[1])
 
 
 
@@ -727,7 +771,16 @@ class BodyPartDataset(Dataset):
 		n_slices = self.metadata["n_slices"][index]
 
 		vn = index
+		spacing = float(self.metadata["slicespacing"][index]) 
+		thickness = float(self.metadata["slicethickness"][index])
 
+		if spacing == 0:
+			spacing = 6
+
+		if thickness == 0:
+			thickness = 6
+
+		slice_spacing = spacing + thickness
 
 		l_x, u_x, l_y, u_y = self.coords_dict[n]
 
@@ -748,6 +801,7 @@ class BodyPartDataset(Dataset):
 	
 		# label = None
 		nodule_volume = None
+
 		label = self.labels[vn].float() / 255
 
 		for s in range(max(n_slices - self.n_volume_slices, 1 + self.radius), n_slices - 2 - self.radius):
@@ -771,6 +825,7 @@ class BodyPartDataset(Dataset):
 
 			n_windows = im.shape[1] // 256 + 1
 
+			z_coord = s * slice_spacing
 
 			for w in range(n_windows):
 
@@ -778,7 +833,7 @@ class BodyPartDataset(Dataset):
 					window_height = int((im.shape[1] - 256) / (n_windows - 1) * w)
 					window = im[:, window_height: window_height + 256]
 
-					z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, window_height - l_y)
+					z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, z_coord, window_height - l_y, nodule_volume.shape[1])
 
 					window_heights.append(window_height)
 					window_features.append(cond_features.unsqueeze(0))
@@ -791,7 +846,7 @@ class BodyPartDataset(Dataset):
 					left_window = im[:, window_height: window_height + 256, :im.shape[2] // 2]
 					right_window = im[:, window_height: window_height + 256, im.shape[2] // 2:]
 
-					z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, window_height - l_y)
+					z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, z_coord, window_height - l_y, nodule_volume.shape[1])
 
 					window_heights.append(window_height)
 					window_heights.append(window_height)
@@ -811,13 +866,13 @@ class BodyPartDataset(Dataset):
 
 		full_label = None
 		full_im = None
-		if self.store_full_volume:
 
+		if self.store_full_volume:
 			full_im = self.full_volumes[vn].float() / 255
+
 		if self.store_full_labels:
 			full_label = self.full_labels[vn].float() / 255
 		
-		# print(full_label.shape, "zzzzzzzzzzzzzzzzzzzz")
 		windows = torch.cat(windows, 0)
 		window_features = torch.cat(window_features, 0)
 		
