@@ -95,7 +95,9 @@ def wb_mask(dataset, index, model, full_res_mask=False, save_plots=False, predic
 
 
 	windows, full_im, full_label, window_features, (l_x, u_x, l_y, u_y), window_heights, slice_numbers, resized_h, window_widths, label, nodule_vol, vn = dataset.ordered_windows(index)
-	windows, window_features = windows.cuda(), window_features.cuda()
+	
+	if torch.cuda.is_available():
+		windows, window_features = windows.cuda(), window_features.cuda()
 	
 	with torch.no_grad():
 		iwae, rec_loss, kls, window_recs, rec_loss_t = model.batch_iwae(windows, None, window_features, 1)

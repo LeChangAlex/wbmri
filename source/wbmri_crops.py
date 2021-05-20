@@ -275,7 +275,7 @@ class BodyPartDataset(Dataset):
 	def __init__(self, split="train", body_part="head", transform=None, vol_size=None, 
 		all_slices=False, n_slices=1, real_labels=False, cond_features=False, cond_noise=False, 
 		return_n=False, cond=[], nodule=False, test_batch=False, multi_ch_nodule=False, sliding_window=False,
-		store_full_volume=False, return_volumes=False, store_full_labels=False, n_volume_slices=40, chop=False):
+		store_full_volume=False, return_volumes=False, store_full_labels=False, n_volume_slices=40, data_dir="default"):
 
 		def exists(i):
 			
@@ -308,10 +308,10 @@ class BodyPartDataset(Dataset):
 		self.nodule = nodule
 		self.return_n = return_n
 		self.store_full_volume = store_full_volume
-		if chop:
-			self.data_path = "/datasets/wbmri/"
+		if data_dir == "default":
+			self.data_path = "volumes/"
 			
-		else:
+		elif data_dir == "vector":
 			self.data_path = "/datasets/wbmri/"
 		
 
@@ -326,9 +326,13 @@ class BodyPartDataset(Dataset):
 		self.store_full_labels = store_full_labels
 		# TODO: Implement function which returns df
 		# with cols [volume_n, age, sex, weight]
-		if chop:
-			self.metadata = pd.read_csv("/cpu008/lechang/wbmri/preprocess/chop_metadata.csv")
-		else:
+		if data_dir == "default":
+			self.metadata = pd.read_csv("metadata.csv")
+			
+		elif data_dir == "chop":
+			self.metadata = pd.read_csv("chop_metadata.csv")
+		
+		elif data_dir == "vector":
 			self.metadata = pd.read_csv("/datasets/wbmri/anonym_wbmri_metadata.csv")
 		
 			self.metadata = self.metadata.fillna("0")
@@ -359,9 +363,14 @@ class BodyPartDataset(Dataset):
 			# remove rows with no coords
 			self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
 		
-		if chop:
-			self.coords_dict = get_crop_coords("preprocess/chop_coords.csv", return_dict=True)
-		else:
+		if data_dir == "default":
+			self.metadata = pd.read_csv("coords.csv")
+			
+		elif data_dir == "chop":
+			self.coords_dict = get_crop_coords("chop_coords.csv", return_dict=True)
+
+	
+		elif data_dir == "vector":
 			self.coords_dict = get_crop_coords("preprocess/chest_headless_coords.csv", return_dict=True)
 			
 		# add n_slice column 
