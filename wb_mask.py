@@ -7,6 +7,7 @@ from os.path import exists, join
 from shutil import copy
 from sys import stderr
 
+from skimage import img_as_uint
 import torch
 from torch.utils.data import DataLoader
 import torch.nn as nn
@@ -23,7 +24,7 @@ import numpy as np
 import random
 from PIL import Image
 
-from source.wbmri_crops import BodyPartDataset
+from source.wbmri_crops import BodyPartDataset, read_png_volume, insert_nodule_volume
 from skimage import exposure, restoration, transform
 
 import math
@@ -72,8 +73,8 @@ parser.add_argument('--legs_model', type=str, default="6")
 parser.add_argument('--channels', type=int, action='store', default=5)
 parser.add_argument('--z_dim', type=int, action='store', default=64)
 
-parser.add_argument('--chest_ckpt', type=str, default="best_checkpoint_flch5b1.tar") #"condyzswfixedy_180.tar")
-parser.add_argument('--legs_ckpt', type=str, default="legs_180.tar")
+parser.add_argument('--chest_ckpt', type=str, default="last_checkpoint_readerchest6.tar") #"condyzfixedy_180.tar")
+parser.add_argument('--legs_ckpt', type=str, default="last_checkpoint_readerlegs6.tar")
 parser.add_argument('--mode', type=str, default="save")
 
 parser.add_argument('--discriminator', action='store_true')
@@ -131,10 +132,10 @@ checkpoint = torch.load(join(args.model_dir, args.chest_ckpt),
 # chest_model.load_state_dict(checkpoint['model_state_dict'])
 chest_model.load_state_dict(checkpoint['model_state_dict'])
 
-# if torch.cuda.is_available():
-# 	chest_model = chest_model.cuda()
-# else:
-# 	print("running on cpu")
+if torch.cuda.is_available():
+	chest_model = chest_model.cuda()
+else:
+	print("running on cpu")
 
 
 # Legs model
@@ -153,27 +154,31 @@ elif args.legs_model == "7":
 						metadata_channels=len(legs_cond),
 						discriminator=args.discriminator)
 
-# legs_cond_method = "input"
-# if args.legs_model in ["7"]:
-# 	legs_cond_method = "resblock"
+legs_cond_method = "input"
+if args.legs_model in ["7"]:
+	legs_cond_method = "resblock"
 
 
-# legs_model = VAE(
-# 	L2L,
-# 	proposal_network,
-# 	generative_network,
-# 	channels=args.channels,
-# 	cond=legs_cond,
-# 	cond_method=legs_cond_method
-# )
+legs_model = VAE(
+	L2L,
+	proposal_network,
+	generative_network,
+	channels=args.channels,
+	cond=legs_cond,
+	cond_method=legs_cond_method
+)
 
-# checkpoint = torch.load(join(args.model_dir, args.legs_ckpt),
-# 							map_location="cuda")
+checkpoint = torch.load(join(args.model_dir, args.legs_ckpt),
+							map_location="cuda")
 
-# # chest_model.load_state_dict(checkpoint['model_state_dict'])
-# legs_model.load_state_dict(checkpoint['model_swatate_dict'])
+# chest_model.load_state_dict(checkpoint['model_state_dict'])
+legs_model.load_state_dict(checkpoint['model_state_dict'])
 
-# legs_model = legs_model.cuda()
+if torch.cuda.is_available():
+	chest_model = chest_model.cuda()
+	legs_model = legs_model.cuda()
+else:
+	print("running on cpu")
 
 pp = True
 
@@ -209,6 +214,10 @@ if args.mode == "mask":
 	flat_losses = []
 	flat_labels = []
 
+
+
+	chest_model.eval()
+	legs_model.eval()
 
 	for i in tqdm(range(4, len(chest_dataset))):
 
@@ -330,7 +339,6 @@ elif args.mode == "validate":
 	# 	sliding_window=True,
 	# 	store_full_labels=True)
 
-	chest_model.eval()
 	metrics_dict = get_validation_score(chest_dataset,
 			chest_model,
 			post_proc=True,
@@ -373,21 +381,8 @@ elif args.mode == "sample":
 
 elif args.mode == "save":
 
-	chest_dataset = BodyPartDataset(split="test", 
-	all_slices=True, 
-	n_slices=5, 
-	return_n=True, 
-	cond=chest_cond,
-	nodule=True,
-	body_part="chest",
-	real_labels=True,
-	store_full_volume=True,
-	sliding_window=True,
-	store_full_labels=True,
-	n_volume_slices=40,
-	data_dir="chop")
 
-	legs_dataset = BodyPartDataset(split="test", 
+	chest_dataset = BodyPartDataset(split="test",
 	all_slices=True, 
 	n_slices=5, 
 	return_n=True, 
@@ -397,17 +392,36 @@ elif args.mode == "save":
 	real_labels=True,
 	store_full_volume=True,
 	sliding_window=True,
-	store_full_labels=True,
+	store_full_labels=False,
 	n_volume_slices=40,
-	data_dir="chop")
+	data_dir="chop",#"reader",
+	n_rows=50,
+	prefix="reader")
+
+	legs_dataset = BodyPartDataset(split="test",
+	all_slices=True, 
+	n_slices=5, 
+	return_n=True, 
+	cond=chest_cond,
+	nodule=True,
+	body_part="legs",
+	real_labels=True,
+	store_full_volume=True,
+	sliding_window=True,
+	store_full_labels=False,
+	n_volume_slices=40,
+	data_dir="chop", #"reader",
+	n_rows=50,
+	prefix="reader")
 
 
 	plot = True
 	flat_losses = []
 	flat_labels = []
 
-
-	for i in tqdm(range(4, len(chest_dataset))):
+	print("ddddd")
+	for i in tqdm(range(len(chest_dataset))):
+		print("eeeee")
 
 		full_im, full_label, chest_mask, (l_x, u_x, l_y, u_y), label, nodule_vol, recs, vn = wb_mask(chest_dataset, i, chest_model, full_res_mask=True)#, gradcam=args.gradcam)
 
@@ -416,7 +430,6 @@ elif args.mode == "save":
 		# resized_chest_mask = resize(chest_mask, (full_im.shape[0], full_im.shape[1] // 2, u_x - l_x))
 
 
-		os.makedirs("masks", exist_ok=True)
 
 
 		# red_label = nodule_vol.clone().unsqueeze(0).repeat(3, 1, 1, 1)
@@ -432,19 +445,92 @@ elif args.mode == "save":
 
 		# full res
 		anomaly_mask = torch.zeros_like(full_im)
+		full_recs = torch.zeros_like(full_im)
+		full_im_nodule = torch.zeros_like(full_im)
+
+
+
+		# print(recs.shape, chest_mask.shape)
 		anomaly_mask[:, :anomaly_mask.shape[1] // 2, l_x: u_x] += chest_mask
+		full_recs[:, :anomaly_mask.shape[1] // 2, l_x: u_x] += recs
+		full_im_nodule[:, :anomaly_mask.shape[1] // 2] += full_im[:, :anomaly_mask.shape[1] // 2]
+
 
 		# _, _, legs_mask, _, _, _, recs, vn = wb_mask(legs_dataset, i, legs_model, full_res_mask=True)
+		full_im, full_label, legs_mask, (l_x, u_x, l_y, u_y), label, nodule_vol, recs, vn = wb_mask(legs_dataset, i, legs_model, full_res_mask=True) #, gradcam=args.gradcam)
 
-		# anomaly_mask[:, anomaly_mask.shape[1] // 2:, :] += legs_mask * 0.5 ############# to remove
-	
 
+		full_recs[:, anomaly_mask.shape[1] // 2:, :] += recs ############# to remove
+		anomaly_mask[:, anomaly_mask.shape[1] // 2:, :] += legs_mask ############# to remove
+
+		full_im_nodule[:, anomaly_mask.shape[1] // 2:] += full_im[:, anomaly_mask.shape[1] // 2:]
 
 		# resized_anomaly_mask = resize(anomaly_mask, (int(anomaly_mask.shape[1] * 256 / anomaly_mask.shape[2]), 256))
-		os.makedirs("masks/volume_{}".format(vn), exist_ok=True)
+		
 
+
+		anomaly_mask[full_recs > full_im_nodule] = 0
+
+		os.makedirs("recs", exist_ok=True)
+		os.makedirs("recs/volume_{}".format(vn), exist_ok=True)
+		for j in range(full_im.shape[0]):
+			skimage.io.imsave("recs/volume_{}/{}.png".format(vn, j), full_recs[j])
+
+		os.makedirs("masks/volume_{}".format(vn), exist_ok=True)
 		for j in range(full_im.shape[0]):
 			skimage.io.imsave("masks/volume_{}/slice_{}.png".format(vn, j), anomaly_mask[j])
 
+		# os.makedirs("nodule_im/volume_{}".format(vn), exist_ok=True)
+		# for j in range(full_im.shape[0]):
+		# 	skimage.io.imsave("nodule_im/volume_{}/{}.png".format(vn, j), full_im[j])
 
+		# os.makedirs("nodule_label/volume_{}".format(vn), exist_ok=True)
+		# for j in range(full_im.shape[0]):
+		# 	skimage.io.imsave("nodule_label/volume_{}/{}.png".format(vn, j), full_label[j])
+
+
+elif args.mode == "gen_training_set":
+	chest_dataset = BodyPartDataset(split="all",#"test", # test
+		all_slices=True, 
+		n_slices=5, 
+		return_n=True, 
+		cond=chest_cond,
+		nodule=True,
+		body_part="chest",
+		real_labels=True,
+		store_full_volume=True,
+		sliding_window=True,
+		store_full_labels=False,
+		n_volume_slices=40,	
+		data_dir="vector",
+		gen_training_set=True)
+
+
+
+
+
+elif args.mode == "add_nodule":
+
+
+	for fn in tqdm(os.listdir("im_recs")):
+		vol = read_png_volume("im_recs/" + fn)
+
+		vol, label = insert_nodule_volume(vol)
+
+
+		os.makedirs("nodule_im/" + fn, exist_ok=True)
+		os.makedirs("nodule_label/" + fn, exist_ok=True)
+
+		for j in range(vol.shape[0]):
+			# print(vol[j].sum(), "==============")
+
+			if vol[j].sum() > 0:
+				skimage.io.imsave("nodule_im/" + fn + "/{}.png".format(j), vol[j])
+			else:
+				skimage.io.imsave("nodule_im/" + fn + "/{}.png".format(j), img_as_uint(vol[j]))
+
+			if label[j].sum() > 0:
+				skimage.io.imsave("nodule_label/" + fn + "/{}.png".format(j), label[j])
+			else:
+				skimage.io.imsave("nodule_label/" + fn + "/{}.png".format(j), img_as_uint(label[j]))
 
