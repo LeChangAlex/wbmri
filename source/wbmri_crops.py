@@ -59,12 +59,12 @@ def read_png_volume(dir, transform=None):
 	vol = []
 	for i in range(len(os.listdir(dir))):
 		a = torch.from_numpy(io.imread(os.path.join(dir, "{}.png".format(i)), as_gray=True)).unsqueeze(0)
-
+		# print(a.shape)
 		# a = a[:a.shape[1]]
 		# if transform:
 		# 	a = transform(a)
 		vol.append(a)
-
+	
 	return torch.cat(vol, 0)
 
 
@@ -277,11 +277,7 @@ class BodyPartDataset(Dataset):
 		return_n=False, cond=[], nodule=False, test_batch=False, multi_ch_nodule=False, sliding_window=False,
 		store_full_volume=False, return_volumes=False, store_full_labels=False, n_volume_slices=40, data_dir="vector", gen_training_set=False, n_rows=None, prefix=None):
 
-		def exists(i):
-			
-			return os.path.exists("/datasets/wbmri/headless_preproc_crops/chest_{}.png".format(i)) or \
-			os.path.exists("/datasets/wbmri/preproc5_bright_crops/chest_{}.png".format(i))
-			# return os.path.exists("im_recs_w_nodules/volume_{}".format(i))
+
 
 		def try_open(fn):
 			try:
@@ -291,13 +287,7 @@ class BodyPartDataset(Dataset):
 			except:
 				print(fn)
 				return
-		def count_slices(self, row):
-			# print(row["volume_path"])
-			# return len(os.listdir(row["volume_path"]))
-			# return len(os.listdir(self.volumes))
 
-			n = row["volume_n"]
-			return len(os.listdir(os.path.join(self.data_path, "volume_{}".format(n))))
 		self.nodule = nodule
 		self.return_n = return_n
 		self.store_full_volume = store_full_volume
@@ -334,7 +324,8 @@ class BodyPartDataset(Dataset):
 			self.metadata = pd.read_csv("metadata.csv")
 			
 		elif data_dir == "chop":
-			self.metadata = pd.read_csv("chop_metadata.csv")
+			self.metadata = pd.read_csv("preprocess/metadata.csv")
+			print(self.metadata)
 		
 		elif data_dir == "reader":
 			# self.metadata = pd.read_csv("reader_set.csv")
@@ -376,7 +367,7 @@ class BodyPartDataset(Dataset):
 			self.metadata = self.metadata[self.metadata["volume_path"].apply(lambda x: x is not None)]
 			
 			# remove rows with no coords
-			self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
+			self.metadata = self.metadata[self.metadata.apply(lambda row: self.exists(row["volume_n"]), axis=1)]
 
 		
 		if data_dir == "default" or "chop":
@@ -384,16 +375,16 @@ class BodyPartDataset(Dataset):
 			# self.metadata = pd.read_csv("coords.csv")
 
 			# self.coords_dict = get_crop_coords("chop_coords.csv", return_dict=True)
-			self.coords_dict = None
-	
+			self.coords_dict = {}
+
+			
 		elif data_dir == "vector" or data_dir == "reader":
 			self.coords_dict = get_crop_coords("preprocess/chest_headless_coords.csv", return_dict=True)
 		
 
 		# add n_slice column 
 		
-			self.metadata["n_slices"] = self.metadata.apply(self.count_slices, 1)
-
+		self.metadata["n_slices"] = self.metadata.apply(self.count_slices, 1)
 
 		if n_rows:
 			self.metadata = self.metadata.reset_index()[:n_rows]
@@ -403,7 +394,7 @@ class BodyPartDataset(Dataset):
 			self.metadata = self.metadata.reset_index()
 
 
-		self.metadata = self.metadata[self.metadata.apply(lambda row: exists(row["volume_n"]), axis=1)]
+		self.metadata = self.metadata[self.metadata.apply(lambda row: self.exists(row["volume_n"]), axis=1)]
 		
 
 		if gen_training_set:
@@ -447,21 +438,20 @@ class BodyPartDataset(Dataset):
 
 		
 		for index in tqdm(range(len(self.metadata))): # to remove
-
 			# print("b========================")
 
 			# print(self.metadata["volume_n"])
 			n = self.metadata["volume_n"][index]
-			if self.data_path == "chop":
-				sex = self.metadata["sex"][index]
-				weight = self.metadata["weight"][index]
-				age = self.metadata["age"][index]
+			# if self.data_path == "chop":
+			sex = self.metadata["sex"][index]
+			weight = self.metadata["weight"][index]
+			age = self.metadata["age"][index]
 
-				n_slices = self.metadata["n_slices"][index]
-				spacing = float(self.metadata["slicespacing"][index]) 
-				thickness = float(self.metadata["slicethickness"][index])
+			n_slices = self.metadata["n_slices"][index]
+			spacing = float(self.metadata["slicespacing"][index]) 
+			thickness = float(self.metadata["slicethickness"][index])
 
-			sex, weight, age, n_slices, spacing, thickness = 0,0,0,0,0,0
+			# sex, weight, age, n_slices, spacing, thickness = 0,0,0,0,0,0
 			if spacing == 0:
 				spacing = 6
 
@@ -493,10 +483,14 @@ class BodyPartDataset(Dataset):
 			full_height = im.shape[1]
 			
 
-			if self.coords_dict:
-				l_x, u_x, l_y, u_y = self.coords_dict[n]
-			else:
+			if self.data_dir == "chop":
 				l_x, u_x = im.shape[2] // 4, im.shape[2] // 4 * 3
+				l_y = 0
+				u_y = 0
+				self.coords_dict[n] = l_x, u_x, l_y, u_y
+
+			else:
+				l_x, u_x, l_y, u_y = self.coords_dict[n]
 
 
 			full_im = None
@@ -652,6 +646,24 @@ class BodyPartDataset(Dataset):
 		print(self.z_mean, self.z_std)
 		print("aaaaa")
 
+
+	def count_slices(self, row):
+		# print(row["volume_path"])
+		# return len(os.listdir(row["volume_path"]))
+		# return len(os.listdir(self.volumes))
+
+		n = row["volume_n"]
+		return len(os.listdir(os.path.join(self.data_path, "volume_{}".format(n))))
+
+
+	def exists(self, i):
+		
+		# return os.path.exists("/datasets/wbmri/headless_preproc_crops/chest_{}.png".format(i)) or \
+		# os.path.exists("/datasets/wbmri/preproc5_bright_crops/chest_{}.png".format(i))
+		# return os.path.exists("im_recs_w_nodules/volume_{}".format(i))
+		return os.path.exists(os.path.join(self.data_path, "volume_{}".format(i)))
+
+
 	def __len__(self):
 
 		if self.split == "test":
@@ -679,6 +691,8 @@ class BodyPartDataset(Dataset):
 
 	def get_features(self, sex, weight, age, s, n_slices, z_coord, height_to_chest, im_height):
 
+		if self.data_dir == "chop":
+			return 0,0,0,0, torch.tensor([]).float()
 		if sex == "M":
 			sex = 1
 		elif sex == "F":
@@ -805,7 +819,6 @@ class BodyPartDataset(Dataset):
 
 		spacing = s
 
-
 		z, sex, age, weight, cond_features = self.get_features(sex, weight, age, s, n_slices, z_coord, h, im.shape[1])
 
 
@@ -851,7 +864,7 @@ class BodyPartDataset(Dataset):
 
 		if self.data_dir == "chop":
 
-			sex, weight, age, spacing, thickness = 0,0,0,0,0
+			# sex, weight, age, spacing, thickness = 0,0,0,0,0
 
 
 			sex = self.metadata["sex"][index]
@@ -869,9 +882,6 @@ class BodyPartDataset(Dataset):
 			thickness = 6
 
 		slice_spacing = spacing + thickness
-
-		l_x, u_x, l_y, u_y = self.coords_dict[n]
-
 
 
 
@@ -895,7 +905,11 @@ class BodyPartDataset(Dataset):
 		for s in range(max(n_slices - self.n_volume_slices, 1 + self.radius), n_slices - 2 - self.radius):
 
 			im = self.nodule_volumes[vn][s - self.radius: s + self.radius + 1].float() / 255
-
+			
+			# if self.coords_dict:
+			l_x, u_x, l_y, u_y = self.coords_dict[n]
+			# else:
+			# 	print(im.shape, l_x, u_x, "===============================")
 
 
 			nodule_volume = self.nodule_volumes[vn].float() / 255 
