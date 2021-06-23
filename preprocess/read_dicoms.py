@@ -6,43 +6,57 @@ import skimage.io
 from PIL import Image
 import sys
 
+from skimage import exposure
 import pandas as pd
 
+def preprocess(vol):
+
+    p2, p98 = np.percentile(vol, (2, 98))
+    vol = exposure.rescale_intensity(vol, in_range=(p2, p98))
+
+    vol = exposure.equalize_adapthist(vol, clip_limit=0.03)
+
+    # Equalization
+    # vol = exposure.equalize_hist(vol)
+    
+    return vol
 
 def read_dcm(dir):
     vol = None
-
     for fn in sorted(os.listdir(dir)):
-        try:
-            dcm = pydicom.read_file(os.path.join(dir, fn))
-            dcm_vol = dcm.pixel_array
-            
-            # print(dcm.shape)
-            if vol is None:
-                vol = dcm_vol[np.newaxis, ...]
+        # try:
+        # print(dir, fn)
+
+        dcm = pydicom.read_file(os.path.join(dir, fn))
+        dcm_vol = dcm.pixel_array
+        
+        # print(dcm.shape)
+        if vol is None:
+            vol = dcm_vol[np.newaxis, ...]
 
 
-                # sex = dcm.PatientSex
-                # age = dcm.PatientAge
-                # weight = dcm.PatientWeight
-                # st = dcm.SliceThickness
-                # ss = dcm.SpacingBetweenSlices
-            
-                # ps = dcm.PixelSpacing
-            
-                metafeatures = {
-                    "sex": dcm.PatientSex,
-                    "age": dcm.PatientAge,
-                    "weight": dcm.PatientWeight,    
-                    "slicethickness": dcm.SliceThickness,
-                    "slicespacing": dcm.SpacingBetweenSlices,
-                    "pixelspacing1": dcm.PixelSpacing,
-                }
-            else:
-                # print(vol.shape)
-                vol = np.concatenate((vol, dcm_vol[np.newaxis, ...]), 0)
-        except:
-            print(dir)
+            # sex = dcm.PatientSex
+            # age = dcm.PatientAge
+            # weight = dcm.PatientWeight
+            # st = dcm.SliceThickness
+            # ss = dcm.SpacingBetweenSlices
+        
+            # ps = dcm.PixelSpacing
+        
+            metafeatures = {
+                "sex": dcm.PatientSex,
+                "age": dcm.PatientAge,
+                "weight": dcm.PatientWeight,    
+                "slicethickness": dcm.SliceThickness,
+                "slicespacing": dcm.SpacingBetweenSlices,
+                "pixelspacing1": dcm.PixelSpacing,
+                "fn": dir
+            }
+        else:
+            # print(vol.shape)
+            vol = np.concatenate((vol, dcm_vol[np.newaxis, ...]), 0)
+        # except:
+            # print(dir)
 
 
 
@@ -58,6 +72,7 @@ df_cols = [
     "slicethickness",
     "slicespacing",
     "pixelspacing1",
+    "fn"
 
 ]
 
@@ -73,6 +88,7 @@ for i in range(len(dicom_dirs)):
 
     vol, metafeatures = read_dcm(os.path.join(dicom_root, dicom_dirs[i]))
     
+    vol = preprocess(vol)
 
 
     os.makedirs(os.path.join(png_root, "volume_{}".format(i)), exist_ok=True)
