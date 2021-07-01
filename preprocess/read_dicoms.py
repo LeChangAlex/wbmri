@@ -9,12 +9,22 @@ import sys
 from skimage import exposure
 import pandas as pd
 
-def preprocess(vol):
+def preprocess(vol, w_list):
 
     p2, p98 = np.percentile(vol, (2, 98))
-    vol = exposure.rescale_intensity(vol, in_range=(p2, p98))
+    for i in range(len(w_list)):
+        # s = vol[i]
+        w_center, w_width = w_list[i]
 
-    vol = exposure.equalize_adapthist(vol, clip_limit=0.03)
+        vol[i] = exposure.rescale_intensity(vol[i], in_range=(w_center - w_width / 2, w_center + w_width / 2), out_range=(0, 255))   
+    # vol = exposure.rescale_intensity(vol, in_range=(p2, p98), out_range=(0, 255))   
+    # print(vol.sum())
+
+    # print(np.amin(vol), np.amax(vol))
+
+    # vol = vol.astype(np.float16) / np.amax(vol) * 255
+
+    # vol = exposure.equalize_adapthist(vol, clip_limit=0.03)
 
     # Equalization
     # vol = exposure.equalize_hist(vol)
@@ -23,12 +33,14 @@ def preprocess(vol):
 
 def read_dcm(dir):
     vol = None
+    w_list = []
     for fn in sorted(os.listdir(dir)):
         # try:
         # print(dir, fn)
 
         dcm = pydicom.read_file(os.path.join(dir, fn))
         dcm_vol = dcm.pixel_array
+
         
         # print(dcm.shape)
         if vol is None:
@@ -57,10 +69,11 @@ def read_dcm(dir):
             vol = np.concatenate((vol, dcm_vol[np.newaxis, ...]), 0)
         # except:
             # print(dir)
+        w_list.append((dcm.WindowCenter, dcm.WindowWidth))
+    print(dcm)
 
 
-
-    return vol, metafeatures
+    return vol, metafeatures, w_list
             
 
 
@@ -86,9 +99,9 @@ dicom_dirs = sorted(os.listdir(dicom_root))
 
 for i in range(len(dicom_dirs)):
 
-    vol, metafeatures = read_dcm(os.path.join(dicom_root, dicom_dirs[i]))
+    vol, metafeatures, w_list = read_dcm(os.path.join(dicom_root, dicom_dirs[i]))
     
-    vol = preprocess(vol)
+    vol = preprocess(vol, w_list)
 
 
     os.makedirs(os.path.join(png_root, "volume_{}".format(i)), exist_ok=True)
