@@ -828,7 +828,7 @@ model.load_state_dict(checkpoint['model_state_dict'])
 model = model.cuda()
 model.eval()
 
-validation_dataset = BodyPartDataset(split="test", all_slices=True, n_slices=args.channels, body_part=args.body_part, real_labels=True)
+validation_dataset = BodyPartDataset(split="test", all_slices=True, n_slices=args.channels, body_part=args.body_part, nodule=True, real_labels=True)
 
 # pixel_losses = []
 # labels = []

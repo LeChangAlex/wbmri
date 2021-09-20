@@ -183,9 +183,11 @@ class VAE(Module):
 		rec_loss = rec_loss_t.sum(-1).sum(-1).sum(-1)
 		kl = kl_divergence(latent_dist, Normal(0, 1)).view(batch.shape[0], -1).sum(-1)
 
-		
+		vlb = rec_loss + beta * kl
+		print(rec_loss.shape, vlb.shape, "oooooooooo")
+
 		# print(rec_loss.shape, kl.shape, "====")
-		return rec_loss + beta * kl, rec_loss_t, kl, rec_params
+		return vlb, rec_loss_t, kl, rec_params
 
 
 	# def features(self, batch, middle_mask=False, K=1, latent_means=False, one_tailed=False, anomaly_score="logp", metadata=None):

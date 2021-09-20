@@ -89,7 +89,7 @@ class MyDataParallel(torch.nn.DataParallel):
 			return super(MyDataParallel, self).__getattr__(name)
 		except AttributeError:
 			return getattr(self.module, name)
-
+print("a")
 
 parser = ArgumentParser(description='Train VAEAC to inpaint.')
 
@@ -143,7 +143,7 @@ parser.add_argument('--blur', action='store_true')
 
 
 parser.add_argument('--dense', action='store_true')
-parser.add_argument('--model', type=str, default="3")
+parser.add_argument('--model', type=str, default="6")
 parser.add_argument('--test_batch', action='store_true')
 parser.add_argument('--validate_only', action='store_true')
 parser.add_argument('--sliding_window', action='store_true')
@@ -153,7 +153,7 @@ parser.add_argument('--loss', type=str, default="l2")
 
 parser.add_argument('--real_labels', action='store_true')
 
-parser.add_argument('--epochs', type=int, action='store', default=250,
+parser.add_argument('--epochs', type=int, action='store', default=1000,
 					help='Number epochs to train VAEAC.')
 parser.add_argument('--d_start', type=int, action='store', default=0)
 parser.add_argument('--batch_size', type=int, action='store', default=64)
@@ -191,10 +191,15 @@ parser.add_argument('--cond_weight', action='store_true')
 parser.add_argument('--cond_sex', action='store_true')
 
 args = parser.parse_args()
+print("b")
+
 wandb.init(project='VAEAC head3d', dir="/scratch/ssd001/home/lechang/GANomaly-PyTorch/vaeac/wandb", name=args.exp, mode="online" if args.wandb else "disabled")
+print("c4")
 
 # Default parameters which are not supposed to be changed from user interface
 use_cuda = torch.cuda.is_available()
+
+print("c3")
 verbose = True
 # Non-zero number of workers cause nasty warnings because of some bug in
 # multiprocess library. It might be fixed now, so maybe it is time to set it
@@ -205,6 +210,7 @@ kl_anneal = 20
 # import the module with the model networks definitions,
 # optimization settings, and a mask generator
 model_module = import_module(args.model_dir + '.model')
+print("c2")
 
 
 # import mask generator
@@ -233,77 +239,6 @@ if args.cond_z:
 if args.cond_y:
 	cond.append("y")
 
-
-# build VAEAC on top of the imported networks
-# if args.vaeac:
-# 	if args.dense:
-# 		proposal_network, prior_network, generative_network = model_module.get_dense_networks(args.channels * 2, args.z_dim)
-# 	else:
-# 		proposal_network, prior_network, generative_network = model_module.get_networks(args.channels * 2, args.z_dim)
-
-# 	model = VAEAC(
-# 		model_module.reconstruction_log_prob,
-# 		proposal_network, 
-# 		prior_network,
-# 		generative_network,
-# 		mask_generator,
-# 		channels=args.channels
-# 	)
-# elif args.cvae:
-# 	print("TRAINING CVAE =======================")
-# 	if args.dense:
-# 		proposal_network, prior_network, generative_network = model_module.get_dense_networks(args.channels, args.z_dim)
-# 	else:
-# 		proposal_network, prior_network, generative_network = model_module.get_networks(args.channels, args.z_dim)
-
-# 	model = CVAE(
-# 		model_module.reconstruction_log_prob,
-# 		proposal_network, 
-# 		prior_network,
-# 		generative_network,
-# 		mask_generator,
-# 		channels=args.channels
-# 	)
-# else:
-# 	print("TRAINING VAE =======================")
-# 	if args.hm:
-# 		model = VAE(
-# 			model_module.reconstruction_log_prob,
-# 			model_module.encoder_network_hm,
-# 			model_module.generative_network_hm,
-# 			channels=args.channels
-# 		)
-# 	else:
-# 		if args.dense:
-# 			proposal_network, generative_network = model_module.get_dense_vae_networks(args.channels, args.z_dim)
-# 		else:
-# 			if args.hw == 16:
-# 				n_outc = args.channels
-# 				if args.loss == "gaussian_loss":
-# 					n_outc *= 2
-
-# 				proposal_network, generative_network, discriminator = model_module.get_vae_networks3(args.channels + len(cond), 
-# 					n_outc, 
-# 					args.z_dim, 
-# 					metadata_channels=len(cond),
-# 					discriminator=args.discriminator)
-
-# 			elif args.hw == 32:
-# 				proposal_network, generative_network = model_module.get_vae_networks4(args.channels + len(cond), args.out_channels, args.z_dim, metadata_channels=len(cond))
-
-# 			elif args.hw == 64:
-# 				proposal_network, generative_network = model_module.get_vae_networks5(args.channels + len(cond), args.out_channels, args.z_dim, metadata_channels=len(cond))
-
-# 		print(args.hw)
-
-
-
-# 		model = VAE(
-# 			reconstruction_log_prob,
-# 			proposal_network,
-# 			generative_network,
-# 			channels=args.channels
-# 		)
 n_outc = args.channels
 if args.loss == "gaussian_loss":
 	n_outc *= 2
@@ -355,7 +290,7 @@ elif args.model == "7":
 cond_method = "input"
 if args.model in ["7"]:
 	cond_method = "resblock"
-
+print("d")
 model = VAE(
 	reconstruction_log_prob,
 	proposal_network,
@@ -369,6 +304,7 @@ wandb.watch(model.encoder_network)
 wandb.watch(model.generative_network)
 
 if use_cuda:
+	print("using gpu")
 
 	model = model.cuda()
 	if args.discriminator:
@@ -615,10 +551,13 @@ for epoch in range(start_epoch, args.epochs):
 		iterator = tqdm(iterator)
 
 	# one epoch
+	print("sssssss=========================================")
 
 	if not args.validate_only:
-		for i, (batch, metadata) in enumerate(iterator):
+		print("vvvvvvvv=========================================")
 
+		for i, (batch, metadata) in enumerate(iterator):
+			print("Aaaaas=========================================")
 			# if i > 1:#
 			# 	continue
 			step += 1
@@ -657,6 +596,8 @@ for epoch in range(start_epoch, args.epochs):
 
 
 			# print(batch.shape)
+
+			print(batch.shape, beta)
 
 			vlb, rec_loss, kl, recs = nn.parallel.data_parallel(model, (batch, args.hm, beta, metadata), device_ids=range(1))
 
@@ -728,7 +669,9 @@ for epoch in range(start_epoch, args.epochs):
 
 		else:
 			epsilon = 0
-
+	print(epoch % 25, "[[[[[[[[[")
+	# if epoch % 200 != 24:
+	# 	continue
 	# print(epsilon,"--------------------")
 	with torch.no_grad():
 		#### make this return a dict
@@ -772,7 +715,7 @@ for epoch in range(start_epoch, args.epochs):
 		if epoch % 20 == 0:
 			torch.save({
 				'epoch': epoch,
-				'model_swatate_dict': model.state_dict(),
+				'model_state_dict': model.state_dict(),
 				'optimizer_state_dict': optimizer.state_dict(),
 				'rec_loss': metrics_dict["rec_loss"],
 				'train_vlb': train_vlb,
@@ -785,7 +728,7 @@ for epoch in range(start_epoch, args.epochs):
 
 	train_images = []
 	radius = args.channels // 2
-	for i in range(15):
+	for i in range(min(15, batch.shape[0])):
 		# if metrics_dict["nodule_recs"][i].shape[radius] == 1:
 		train_canvas = torch.cat((batch[i][radius].cpu(), 
 			recs[i][radius].cpu(), 
@@ -817,6 +760,28 @@ for epoch in range(start_epoch, args.epochs):
 	# images = torch.cat((metrics_dict["batch_nodule"], metrics_dict["batch_labels"], metrics_dict["nodule_rec_loss_t"] * 5, metrics_dict["nodule_recs"]), 2)
 	# images = images.reshape(-1, 256 * 4).clamp(0, 1)
 
+	images = []
+	for i in range(1 if args.test_batch else min(20, len(metrics_dict["val_batch"]))):
+		# if metrics_dict["nodule_recs"][i].shape[radius] == 1:
+
+		mask = (metrics_dict["val_batch"][i].cpu() - metrics_dict["val_recs"][i].cpu()) ** 2 * 5
+
+		print(mask.shape, metrics_dict["val_batch"][i].cpu().shape, metrics_dict["val_recs"][i].cpu().shape, "========================")
+		
+		canvas = torch.cat((metrics_dict["val_batch"][i].cpu(), 
+							metrics_dict["val_recs"][i].cpu(),
+							mask), 1)
+		print(canvas.shape)
+		images.append(canvas)
+
+	images = torch.cat(images, 0)
+	print(images.shape, "------------------------------")
+	# images = torch.cat((metrics_dict["batch_nodule"], metrics_dict["batch_labels"], metrics_dict["nodule_rec_loss_t"] * 5, metrics_dict["nodule_recs"]), 2)
+	if args.body_part == "chest":
+		images = images.reshape(-1, 256 * 3).clamp(0, 1)
+	elif args.body_part == "legs":
+		images = images.reshape(-1, 512 * 3).clamp(0, 1)
+
 
 
 	# red_label = metrics_dict["batch_nodule"].unsqueeze(0).repeat(3, 1, 1, 1)
@@ -829,7 +794,7 @@ for epoch in range(start_epoch, args.epochs):
 		"train_loss/train_rl": rec_loss.sum(-1).sum(-1).sum(-1).mean().item(),
 		"train_loss/train_kl": kl.item(),
 		"val_loss/val_rl": metrics_dict["rec_loss"],
-        # "reconstructions/validation":[wandb.Image(images)],
+        "reconstructions/validation":[wandb.Image(images)],
         "reconstructions/train":[wandb.Image(train_images)],
         # "reconstructions/red_label":[wandb.Image(red_label)],
 
